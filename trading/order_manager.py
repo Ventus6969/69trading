@@ -480,19 +480,57 @@ class OrderManager:
         return cancelled_count
     
     def handle_tp_filled(self, tp_client_order_id):
-        """處理止盈單成交"""
+        """處理止盈單成交 - 修正版本：同時取消對應的止損單"""
         for order_id, order_info in self.orders.items():
             if order_info.get('tp_client_id') == tp_client_order_id:
+                # 更新訂單狀態
                 self.orders[order_id]['status'] = 'TP_FILLED'
-                logger.info(f"原始訂單 {order_id} 已通過止盈完成")
+                
+                # 🔥 新增：取消對應的止損單
+                sl_client_id = order_info.get('sl_client_id')
+                if sl_client_id:
+                    symbol = order_info.get('symbol')
+                    logger.info(f"止盈單 {tp_client_order_id} 已成交，正在取消對應的止損單 {sl_client_id}")
+                    
+                    cancel_result = binance_client.cancel_order(symbol, sl_client_id)
+                    if cancel_result:
+                        logger.info(f"成功取消止損單 {sl_client_id}")
+                        # 更新止損單狀態
+                        order_info['sl_placed'] = False
+                        order_info['sl_cancelled_by_tp'] = True  # 標記是由止盈觸發的取消
+                    else:
+                        logger.warning(f"取消止損單 {sl_client_id} 失敗，可能已經被取消或成交")
+                else:
+                    logger.info(f"原始訂單 {order_id} 沒有對應的止損單")
+                
+                logger.info(f"原始訂單 {order_id} 已通過止盈完成，相關止損單已處理")
                 break
     
     def handle_sl_filled(self, sl_client_order_id):
-        """處理止損單成交"""
+        """處理止損單成交 - 修正版本：同時取消對應的止盈單"""
         for order_id, order_info in self.orders.items():
             if order_info.get('sl_client_id') == sl_client_order_id:
+                # 更新訂單狀態
                 self.orders[order_id]['status'] = 'SL_FILLED'
-                logger.info(f"原始訂單 {order_id} 已通過止損完成")
+                
+                # 🔥 新增：取消對應的止盈單
+                tp_client_id = order_info.get('tp_client_id')
+                if tp_client_id:
+                    symbol = order_info.get('symbol')
+                    logger.info(f"止損單 {sl_client_order_id} 已成交，正在取消對應的止盈單 {tp_client_id}")
+                    
+                    cancel_result = binance_client.cancel_order(symbol, tp_client_id)
+                    if cancel_result:
+                        logger.info(f"成功取消止盈單 {tp_client_id}")
+                        # 更新止盈單狀態
+                        order_info['tp_placed'] = False
+                        order_info['tp_cancelled_by_sl'] = True  # 標記是由止損觸發的取消
+                    else:
+                        logger.warning(f"取消止盈單 {tp_client_id} 失敗，可能已經被取消或成交")
+                else:
+                    logger.info(f"原始訂單 {order_id} 沒有對應的止盈單")
+                
+                logger.info(f"原始訂單 {order_id} 已通過止損完成，相關止盈單已處理")
                 break
     
     def get_orders(self):
