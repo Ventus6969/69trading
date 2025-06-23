@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.so
+.env
+.env.follow
+logs/
+*.log
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,19 @@
+# 69大師背離交易機器人 - 依賴清單 
+# Python 3.8+ required 
+ 
+# Web框架 
+Flask==2.3.3 
+Werkzeug==2.3.7 
+ 
+# HTTP請求 
+requests==2.31.0 
+urllib3==2.0.7 
+ 
+# WebSocket客戶端 
+websocket-client==1.6.4 
+ 
+# 環境變量管理 
+python-dotenv==1.0.0 
+ 
+# 時間處理 
+pytz==2023.3 
