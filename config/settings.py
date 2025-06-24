@@ -35,14 +35,14 @@ WS_BASE_URL = "wss://fstream.binance.com/ws"
 
 # 交易對價格精度設定
 SYMBOL_PRECISION = {
-    'SOLUSDT': 2,       # SOL 精度為小數點後2位
-    'BTCUSDT': 1,       # BTC 精度為小數點後1位
-    'ETHUSDT': 2,       # ETH 精度為小數點後2位
-    'WLDUSDC': 5,       # WLD 精度為小數點後5位
+    'SOLUSDT': 2,       # SOLUSDT 精度為小數點後2位
+    'BTCUSDT': 1,       # BTCUSDT 精度為小數點後1位
+    'ETHUSDT': 2,       # ETHUSDT 精度為小數點後2位
+    'WLDUSDC': 5,       # WLDUSDC 精度為小數點後5位
     'SOLUSDC': 2,       # SOLUSDC 精度為小數點後2位
     'BTCUSDC': 1,       # BTCUSDC 精度為小數點後1位
     'ETHUSDC': 2,       # ETHUSDC 精度為小數點後2位
-    'LTCUSDC': 2,       # LTCUSDC 精度為小數點後2位	
+    'BNBUSDC': 2,       # BNBUSDC 精度為小數點後2位	
     # 可以根據需要添加更多交易對
 }
 
