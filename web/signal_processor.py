@@ -1,6 +1,6 @@
 """
-交易信號處理模組
-處理來自TradingView的交易信號
+交易信號處理模組 - 修正時序問題版本
+處理來自TradingView的交易信號，並記錄完整的交易數據
 =============================================================================
 """
 import time
@@ -20,6 +20,9 @@ from config.settings import (
     TRADING_BLOCK_END_HOUR, TRADING_BLOCK_END_MINUTE, ORDER_TIMEOUT_MINUTES
 )
 
+# 🔥 新增：導入交易數據管理器
+from trading_data_manager import trading_data_manager
+
 # 設置logger
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,8 @@ class SignalProcessor:
     def __init__(self):
         # 用於存儲最近的webhook數據
         self.last_webhook_data = None
+        # 🔥 新增：用於追蹤信號ID和訂單ID的對應關係
+        self.signal_order_mapping = {}
     
     def process_signal(self, signal_data):
         """
@@ -40,11 +45,18 @@ class SignalProcessor:
         Returns:
             dict: 處理結果
         """
+        signal_start_time = time.time()  # 🔥 新增：記錄信號處理開始時間
+        signal_id = None  # 🔥 新增：用於追蹤數據記錄
+        
         try:
             # === 1. 驗證數據 ===
             is_valid, error_msg = validate_signal_data(signal_data)
             if not is_valid:
                 return {"status": "error", "message": error_msg}
+            
+            # 🔥 新增：立即記錄接收到的信號
+            signal_id = trading_data_manager.record_signal_received(signal_data)
+            logger.info(f"信號已記錄到資料庫，ID: {signal_id}")
             
             # === 2. 檢查交易時間限制 ===
             if is_within_time_range(TRADING_BLOCK_START_HOUR, TRADING_BLOCK_START_MINUTE, 
@@ -53,7 +65,8 @@ class SignalProcessor:
                 return {
                     "status": "ignored", 
                     "message": "當前時間為台灣時間20:00-23:50之間，根據設定不執行下單操作",
-                    "current_time": datetime.now(TW_TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
+                    "current_time": datetime.now(TW_TIMEZONE).strftime('%Y-%m-%d %H:%M:%S'),
+                    "signal_id": signal_id  # 🔥 新增：返回信號ID
                 }
             
             # === 3. 解析信號數據 ===
@@ -62,6 +75,7 @@ class SignalProcessor:
             # === 4. 檢查現有倉位 ===
             position_decision = self._check_position_conflict(parsed_signal)
             if position_decision['action'] == 'ignore':
+                position_decision['signal_id'] = signal_id  # 🔥 新增：添加信號ID
                 return position_decision
             
             # === 5. 設置交易參數 ===
@@ -74,14 +88,14 @@ class SignalProcessor:
             self._save_webhook_data(parsed_signal, tp_params)
             
             # === 8. 生成訂單 ===
-            order_result = self._create_and_execute_order(parsed_signal, tp_params, position_decision)
+            order_result = self._create_and_execute_order(parsed_signal, tp_params, position_decision, signal_id, signal_start_time)
             
             return order_result
             
         except Exception as e:
             logger.error(f"處理交易信號時出錯: {str(e)}")
             logger.error(traceback.format_exc())
-            return {"status": "error", "message": str(e)}
+            return {"status": "error", "message": str(e), "signal_id": signal_id}
     
     def _parse_signal_data(self, data):
         """解析信號數據"""
@@ -270,14 +284,52 @@ class SignalProcessor:
             'precision': parsed_signal['precision']
         }
     
-    def _create_and_execute_order(self, parsed_signal, tp_params, position_decision):
-        """創建並執行訂單"""
+    def _create_and_execute_order(self, parsed_signal, tp_params, position_decision, signal_id, signal_start_time):
+        """創建並執行訂單 - 修正版本：提前保存訂單記錄"""
         try:
             # 生成訂單ID
             client_order_id = self._generate_order_id(parsed_signal)
             
+            # 🔥 新增：記錄信號ID和訂單ID的對應關係
+            self.signal_order_mapping[client_order_id] = signal_id
+            
             # 計算訂單過期時間
             expiry_time = int(time.time() * 1000) + (ORDER_TIMEOUT_MINUTES * 60 * 1000)
+            
+            # 記錄下單詳情
+            entry_mode = get_entry_mode_name(parsed_signal['opposite'])
+            logger.info(f"準備下單詳情 - 交易對: {parsed_signal['symbol']}, "
+                       f"方向: {parsed_signal['side']}, 設定精度: {parsed_signal['precision']}")
+            logger.info(f"開倉價格: {parsed_signal['price']}, 數量: {parsed_signal['quantity']}, "
+                       f"槓桿: {DEFAULT_LEVERAGE}x")
+            logger.info(f"止盈倍數: {parsed_signal['tp_multiplier']}, 開倉模式: {entry_mode}")
+            
+            # 🔥 修正：在下單前就保存訂單記錄，確保WebSocket能找到
+            order_data = {
+                'symbol': parsed_signal['symbol'],
+                'side': parsed_signal['side'],
+                'quantity': parsed_signal['quantity'],
+                'price': parsed_signal['price'],
+                'type': parsed_signal['order_type'],
+                'status': 'PENDING',  # 設為PENDING狀態
+                'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'tp_placed': False,
+                'atr': parsed_signal['atr_value'],
+                'tp_price_offset': tp_params['tp_price_offset'],
+                'tp_multiplier': tp_params['tp_multiplier'],
+                'leverage': DEFAULT_LEVERAGE,
+                'margin_type': parsed_signal['margin_type'],
+                'open_price': parsed_signal['open_price'],
+                'close_price': parsed_signal['close_price'],
+                'opposite': parsed_signal['opposite'],
+                'expiry_time': datetime.fromtimestamp(expiry_time/1000).strftime('%Y-%m-%d %H:%M:%S'),
+                'is_add_position': position_decision['is_add_position'],
+                'signal_id': signal_id
+            }
+            
+            # 🔥 關鍵修正：提前保存訂單記錄，確保WebSocket處理時能找到
+            order_manager.save_order_info(client_order_id, order_data)
+            logger.info(f"已提前保存訂單記錄: {client_order_id}")
             
             # 準備下單參數
             order_params = {
@@ -295,41 +347,43 @@ class SignalProcessor:
                 order_params["time_in_force"] = 'GTD'
                 order_params["good_till_date"] = expiry_time
             
-            # 記錄下單詳情
-            entry_mode = get_entry_mode_name(parsed_signal['opposite'])
-            logger.info(f"準備下單詳情 - 交易對: {parsed_signal['symbol']}, "
-                       f"方向: {parsed_signal['side']}, 設定精度: {parsed_signal['precision']}")
-            logger.info(f"開倉價格: {parsed_signal['price']}, 數量: {parsed_signal['quantity']}, "
-                       f"槓桿: {DEFAULT_LEVERAGE}x")
-            logger.info(f"止盈倍數: {parsed_signal['tp_multiplier']}, 開倉模式: {entry_mode}")
-            
             # 執行下單
             order_result = order_manager.create_order(**order_params)
             
+            # 🔥 新增：計算執行延遲並記錄訂單執行數據
+            execution_delay_ms = int((time.time() - signal_start_time) * 1000)
+            
             if order_result:
-                # 保存訂單信息
-                order_data = {
+                # 🔥 修正：更新訂單狀態為成功，而不是重新保存
+                order_manager.orders[client_order_id]['status'] = 'NEW'
+                order_manager.orders[client_order_id]['binance_order_id'] = order_result.get("orderId")
+                order_manager.orders[client_order_id]['execution_delay_ms'] = execution_delay_ms
+                
+                logger.info(f"訂單狀態已更新為NEW: {client_order_id}")
+                
+                # 🔥 新增：準備訂單執行數據並記錄到資料庫
+                order_execution_data = {
+                    'client_order_id': client_order_id,
                     'symbol': parsed_signal['symbol'],
                     'side': parsed_signal['side'],
+                    'order_type': parsed_signal['order_type'],
                     'quantity': parsed_signal['quantity'],
                     'price': parsed_signal['price'],
-                    'type': parsed_signal['order_type'],
-                    'status': 'NEW',
-                    'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'tp_placed': False,
-                    'atr': parsed_signal['atr_value'],
-                    'tp_price_offset': tp_params['tp_price_offset'],
-                    'tp_multiplier': tp_params['tp_multiplier'],
                     'leverage': DEFAULT_LEVERAGE,
-                    'margin_type': parsed_signal['margin_type'],
-                    'open_price': parsed_signal['open_price'],
-                    'close_price': parsed_signal['close_price'],
-                    'opposite': parsed_signal['opposite'],
-                    'expiry_time': datetime.fromtimestamp(expiry_time/1000).strftime('%Y-%m-%d %H:%M:%S'),
-                    'is_add_position': position_decision['is_add_position']
+                    'execution_delay_ms': execution_delay_ms,
+                    'binance_order_id': order_result.get('orderId'),
+                    'status': 'NEW',
+                    'is_add_position': position_decision['is_add_position'],
+                    # 這些會在後續止盈止損設置時更新
+                    'tp_client_id': None,
+                    'sl_client_id': None,
+                    'tp_price': None,
+                    'sl_price': None
                 }
                 
-                order_manager.save_order_info(client_order_id, order_data)
+                # 記錄到資料庫
+                trading_data_manager.record_order_executed(signal_id, order_execution_data)
+                logger.info(f"訂單執行已記錄到資料庫，延遲: {execution_delay_ms}ms")
                 
                 # 記錄成功日誌
                 logger.info(f"接收到TradingView信號，已下單: {client_order_id}, "
@@ -338,7 +392,8 @@ class SignalProcessor:
                            f"開倉模式: {entry_mode}, "
                            f"策略類型: {parsed_signal['signal_type'] or '未指定'}, "
                            f"止盈倍數: {parsed_signal['tp_multiplier']}, "
-                           f"操作類型: {'加倉' if position_decision['is_add_position'] else '新開倉'}")
+                           f"操作類型: {'加倉' if position_decision['is_add_position'] else '新開倉'}, "
+                           f"執行延遲: {execution_delay_ms}ms")
                 
                 return {
                     "status": "success", 
@@ -351,15 +406,19 @@ class SignalProcessor:
                     "signal_type": parsed_signal['signal_type'] or "未指定",
                     "tp_multiplier": parsed_signal['tp_multiplier'],
                     "operation_type": "加倉" if position_decision['is_add_position'] else "新開倉",
-                    "expiry_time": datetime.fromtimestamp(expiry_time/1000).strftime('%Y-%m-%d %H:%M:%S')
+                    "expiry_time": datetime.fromtimestamp(expiry_time/1000).strftime('%Y-%m-%d %H:%M:%S'),
+                    "execution_delay_ms": execution_delay_ms,  # 🔥 新增
+                    "signal_id": signal_id  # 🔥 新增
                 }
             else:
-                return {"status": "error", "message": "下單失敗"}
+                # 下單失敗，更新狀態
+                order_manager.orders[client_order_id]['status'] = 'FAILED'
+                return {"status": "error", "message": "下單失敗", "signal_id": signal_id}
                 
         except Exception as e:
             logger.error(f"創建訂單時出錯: {str(e)}")
             logger.error(traceback.format_exc())
-            return {"status": "error", "message": str(e)}
+            return {"status": "error", "message": str(e), "signal_id": signal_id}
     
     def _generate_order_id(self, parsed_signal):
         """生成訂單ID"""
@@ -388,6 +447,11 @@ class SignalProcessor:
     def get_last_webhook_data(self):
         """獲取最近的webhook數據"""
         return self.last_webhook_data
+    
+    # 🔥 新增：提供信號ID查詢功能
+    def get_signal_id_by_order_id(self, client_order_id):
+        """根據訂單ID獲取信號ID"""
+        return self.signal_order_mapping.get(client_order_id)
 
 # 創建全局信號處理器實例
 signal_processor = SignalProcessor()
