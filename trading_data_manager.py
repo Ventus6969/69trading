@@ -9,7 +9,7 @@ import json
 import time
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List  # 🔥 修復：添加 typing import
 from config.settings import LOG_DIRECTORY
 
 # 設置logger
@@ -255,6 +255,71 @@ class TradingDataManager:
             logger.error(f"記錄訂單執行時出錯: {str(e)}")
             return False
     
+    # 🔥 新增：關鍵修復方法
+    def record_trading_result_by_client_id(self, client_order_id: str, result_data: Dict[str, Any]) -> bool:
+        """
+        根據客戶訂單ID記錄交易結果
+        
+        Args:
+            client_order_id: 客戶訂單ID
+            result_data: 交易結果數據
+            
+        Returns:
+            bool: 是否記錄成功
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 查找對應的訂單記錄
+                cursor.execute("""
+                    SELECT id FROM orders_executed 
+                    WHERE client_order_id = ?
+                """, (client_order_id,))
+                
+                order_record = cursor.fetchone()
+                if not order_record:
+                    logger.error(f"未找到訂單記錄: {client_order_id}")
+                    return False
+                
+                order_id = order_record[0]
+                
+                # 檢查是否已存在交易結果
+                cursor.execute("SELECT id FROM trading_results WHERE order_id = ?", (order_id,))
+                if cursor.fetchone():
+                    logger.info(f"訂單 {client_order_id} 交易結果已存在，跳過重複記錄")
+                    return True
+                
+                # 插入交易結果記錄
+                cursor.execute("""
+                    INSERT INTO trading_results (
+                        order_id, client_order_id, symbol, final_pnl, pnl_percentage,
+                        exit_method, entry_price, exit_price, total_quantity,
+                        result_timestamp, is_successful, holding_time_minutes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    order_id,
+                    result_data['client_order_id'],
+                    result_data['symbol'],
+                    result_data['final_pnl'],
+                    result_data.get('pnl_percentage', 0),
+                    result_data['exit_method'],
+                    result_data['entry_price'],
+                    result_data['exit_price'],
+                    result_data['total_quantity'],
+                    result_data['result_timestamp'],
+                    result_data['is_successful'],
+                    result_data['holding_time_minutes']
+                ))
+                
+                conn.commit()
+                logger.info(f"✅ 交易結果已記錄: {client_order_id}, 盈虧: {result_data['final_pnl']}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"記錄交易結果失敗: {str(e)}")
+            return False
+    
     def get_recent_signals(self, limit: int = 10) -> List[Dict]:
         """獲取最近的信號記錄"""
         try:
@@ -273,6 +338,98 @@ class TradingDataManager:
         except Exception as e:
             logger.error(f"獲取最近信號時出錯: {str(e)}")
             return []
+    
+    def get_recent_trading_results(self, limit: int = 10) -> List[Dict]:
+        """獲取最近的交易結果"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT 
+                        r.*,
+                        s.signal_type,
+                        s.symbol as signal_symbol,
+                        o.side
+                    FROM trading_results r
+                    JOIN orders_executed o ON r.order_id = o.id
+                    JOIN signals_received s ON o.signal_id = s.id
+                    ORDER BY r.result_timestamp DESC
+                    LIMIT ?
+                """, (limit,))
+                
+                return [dict(row) for row in cursor.fetchall()]
+                
+        except Exception as e:
+            logger.error(f"獲取交易結果時出錯: {str(e)}")
+            return []
+    
+    def get_win_rate_stats(self) -> Dict[str, Any]:
+        """獲取勝率統計"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 總體勝率
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total,
+                        SUM(CASE WHEN is_successful = 1 THEN 1 ELSE 0 END) as wins,
+                        SUM(final_pnl) as total_pnl
+                    FROM trading_results
+                """)
+                
+                overall = cursor.fetchone()
+                total, wins, total_pnl = overall
+                
+                overall_win_rate = (wins / total * 100) if total > 0 else 0
+                
+                # 按信號類型統計
+                cursor.execute("""
+                    SELECT 
+                        s.signal_type,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN r.is_successful = 1 THEN 1 ELSE 0 END) as wins,
+                        SUM(r.final_pnl) as pnl,
+                        AVG(r.final_pnl) as avg_pnl
+                    FROM trading_results r
+                    JOIN orders_executed o ON r.order_id = o.id  
+                    JOIN signals_received s ON o.signal_id = s.id
+                    GROUP BY s.signal_type
+                    ORDER BY wins DESC
+                """)
+                
+                signal_stats = []
+                for row in cursor.fetchall():
+                    signal_type, total, wins, pnl, avg_pnl = row
+                    win_rate = (wins / total * 100) if total > 0 else 0
+                    signal_stats.append({
+                        'signal_type': signal_type,
+                        'total': total,
+                        'wins': wins,
+                        'win_rate': round(win_rate, 1),
+                        'total_pnl': round(pnl or 0, 4),
+                        'avg_pnl': round(avg_pnl or 0, 4)
+                    })
+                
+                return {
+                    'overall_win_rate': round(overall_win_rate, 1),
+                    'total_trades': total,
+                    'successful_trades': wins,
+                    'total_pnl': round(total_pnl or 0, 4),
+                    'by_signal_type': signal_stats
+                }
+                
+        except Exception as e:
+            logger.error(f"獲取勝率統計時出錯: {str(e)}")
+            return {
+                'overall_win_rate': 0,
+                'total_trades': 0, 
+                'successful_trades': 0,
+                'total_pnl': 0,
+                'by_signal_type': []
+            }
     
     def get_database_stats(self) -> Dict[str, Any]:
         """獲取資料庫統計信息"""
@@ -312,6 +469,81 @@ class TradingDataManager:
         except Exception as e:
             logger.error(f"獲取資料庫統計時出錯: {str(e)}")
             return {}
+    
+    def _update_daily_stats(self):
+        """更新每日統計數據"""
+        try:
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 計算今日統計
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_signals
+                    FROM signals_received 
+                    WHERE DATE(datetime(timestamp, 'unixepoch')) = ?
+                """, (today,))
+                total_signals = cursor.fetchone()[0]
+                
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_orders
+                    FROM orders_executed 
+                    WHERE DATE(datetime(execution_timestamp, 'unixepoch')) = ?
+                """, (today,))
+                total_orders = cursor.fetchone()[0]
+                
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_trades,
+                        SUM(CASE WHEN is_successful = 1 THEN 1 ELSE 0 END) as successful_trades,
+                        SUM(final_pnl) as total_pnl,
+                        MAX(final_pnl) as best_trade,
+                        MIN(final_pnl) as worst_trade,
+                        AVG(holding_time_minutes) as avg_holding_time
+                    FROM trading_results 
+                    WHERE DATE(datetime(result_timestamp, 'unixepoch')) = ?
+                """, (today,))
+                
+                trade_stats = cursor.fetchone()
+                total_trades, successful_trades, total_pnl, best_trade, worst_trade, avg_holding_time = trade_stats
+                
+                # 計算勝率
+                win_rate = (successful_trades / total_trades * 100) if total_trades > 0 else 0
+                
+                # 計算信號類型統計
+                cursor.execute("""
+                    SELECT s.signal_type, COUNT(*) 
+                    FROM signals_received s
+                    JOIN orders_executed o ON s.id = o.signal_id
+                    JOIN trading_results r ON o.id = r.order_id
+                    WHERE DATE(datetime(r.result_timestamp, 'unixepoch')) = ?
+                    GROUP BY s.signal_type
+                """, (today,))
+                
+                signal_type_stats = dict(cursor.fetchall())
+                
+                # 更新或插入每日統計
+                cursor.execute("""
+                    INSERT OR REPLACE INTO daily_stats (
+                        date, total_signals, total_orders, successful_trades, failed_trades,
+                        win_rate, total_pnl, best_trade, worst_trade, avg_holding_time,
+                        signal_type_stats, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    today, total_signals, total_orders, successful_trades or 0, 
+                    (total_trades - successful_trades) if total_trades and successful_trades else 0,
+                    round(win_rate, 2), total_pnl or 0, best_trade or 0, worst_trade or 0,
+                    avg_holding_time or 0, json.dumps(signal_type_stats)
+                ))
+                
+                conn.commit()
+                logger.info(f"已更新每日統計: {today}, 勝率: {win_rate:.1f}%")
+                
+        except Exception as e:
+            logger.error(f"更新每日統計時出錯: {str(e)}")
 
 # 創建全局數據管理器實例
 trading_data_manager = TradingDataManager()

@@ -1,6 +1,7 @@
 """
 訂單管理模組
 包含所有訂單相關操作，修正重複處理和止盈邏輯問題
+🔥 修正版本：添加trading_results記錄功能
 =============================================================================
 """
 import time
@@ -499,11 +500,20 @@ class OrderManager:
         logger.info(f"已取消 {symbol} 的 {cancelled_count} 個止損單")
         return cancelled_count
     
+    # 🔥 關鍵修正：添加trading_results記錄功能
     def handle_tp_filled(self, tp_client_order_id):
-        """處理止盈單成交 - 修正版本：同時取消對應的止損單"""
+        """處理止盈單成交 - 修正版本：記錄trading_results + 取消止損單"""
         for order_id, order_info in self.orders.items():
             if order_info.get('tp_client_id') and tp_client_order_id.startswith(order_info.get('tp_client_id', '')[:20]):
-                # 更新訂單狀態
+                
+                # 🔥 關鍵新增：記錄交易結果到trading_results表
+                try:
+                    self._record_tp_result(order_info)
+                    logger.info(f"✅ 止盈交易結果已記錄: {order_id}")
+                except Exception as e:
+                    logger.error(f"❌ 記錄止盈結果失敗: {str(e)}")
+                
+                # 更新訂單狀態（原有邏輯）
                 self.orders[order_id]['status'] = 'TP_FILLED'
                 
                 # 🔥 新增：取消對應的止損單
@@ -525,12 +535,20 @@ class OrderManager:
                 
                 logger.info(f"原始訂單 {order_id} 已通過止盈完成，相關止損單已處理")
                 break
-    
+
     def handle_sl_filled(self, sl_client_order_id):
-        """處理止損單成交 - 修正版本：同時取消對應的止盈單"""
+        """處理止損單成交 - 修正版本：記錄trading_results + 取消止盈單"""
         for order_id, order_info in self.orders.items():
             if order_info.get('sl_client_id') and sl_client_order_id.startswith(order_info.get('sl_client_id', '')[:20]):
-                # 更新訂單狀態
+                
+                # 🔥 關鍵新增：記錄交易結果到trading_results表
+                try:
+                    self._record_sl_result(order_info)
+                    logger.info(f"✅ 止損交易結果已記錄: {order_id}")
+                except Exception as e:
+                    logger.error(f"❌ 記錄止損結果失敗: {str(e)}")
+                
+                # 更新訂單狀態（原有邏輯）
                 self.orders[order_id]['status'] = 'SL_FILLED'
                 
                 # 🔥 新增：取消對應的止盈單
@@ -552,6 +570,129 @@ class OrderManager:
                 
                 logger.info(f"原始訂單 {order_id} 已通過止損完成，相關止盈單已處理")
                 break
+    
+    # 🔥 新增：交易結果記錄方法
+    def _record_tp_result(self, order_info):
+        """記錄止盈結果到trading_results表"""
+        try:
+            # 計算基本數據
+            entry_price = float(order_info.get('price', 0))
+            tp_price = float(order_info.get('tp_price', entry_price * 1.01))  # 使用記錄的止盈價
+            quantity = float(order_info.get('total_quantity') or order_info.get('quantity', 0))
+            side = order_info.get('side')
+            entry_time_str = order_info.get('entry_time')
+            
+            # 計算盈虧
+            if side == 'BUY':
+                pnl = (tp_price - entry_price) * quantity
+            else:  # SELL
+                pnl = (entry_price - tp_price) * quantity
+            
+            # 計算持有時間
+            holding_time = self._calculate_holding_time(entry_time_str)
+            
+            # 準備結果數據
+            result_data = {
+                'client_order_id': order_info.get('client_order_id'),
+                'symbol': order_info.get('symbol'),
+                'final_pnl': round(pnl, 4),
+                'pnl_percentage': round((pnl / (entry_price * quantity)) * 100, 2),
+                'exit_method': 'TP_FILLED',
+                'entry_price': entry_price,
+                'exit_price': tp_price,
+                'total_quantity': quantity,
+                'result_timestamp': int(time.time()),
+                'is_successful': True,  # 止盈表示成功
+                'holding_time_minutes': holding_time
+            }
+            
+            # 寫入資料庫
+            from trading_data_manager import trading_data_manager
+            success = trading_data_manager.record_trading_result_by_client_id(
+                order_info.get('client_order_id'), result_data
+            )
+            
+            if success:
+                logger.info(f"止盈結果記錄成功: 盈利 +{pnl:.4f} USDT, 持有時間: {holding_time}分鐘")
+            else:
+                logger.error(f"止盈結果記錄失敗")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"記錄止盈結果時出錯: {str(e)}")
+            return False
+    
+    def _record_sl_result(self, order_info):
+        """記錄止損結果到trading_results表"""
+        try:
+            # 計算基本數據
+            entry_price = float(order_info.get('price', 0))
+            sl_price = float(order_info.get('sl_price', entry_price * 0.98))  # 使用記錄的止損價
+            quantity = float(order_info.get('total_quantity') or order_info.get('quantity', 0))
+            side = order_info.get('side')
+            entry_time_str = order_info.get('entry_time')
+            
+            # 計算盈虧
+            if side == 'BUY':
+                pnl = (sl_price - entry_price) * quantity
+            else:  # SELL
+                pnl = (entry_price - sl_price) * quantity
+            
+            # 計算持有時間
+            holding_time = self._calculate_holding_time(entry_time_str)
+            
+            # 準備結果數據
+            result_data = {
+                'client_order_id': order_info.get('client_order_id'),
+                'symbol': order_info.get('symbol'),
+                'final_pnl': round(pnl, 4),
+                'pnl_percentage': round((pnl / (entry_price * quantity)) * 100, 2),
+                'exit_method': 'SL_FILLED',
+                'entry_price': entry_price,
+                'exit_price': sl_price,
+                'total_quantity': quantity,
+                'result_timestamp': int(time.time()),
+                'is_successful': False,  # 止損表示失敗
+                'holding_time_minutes': holding_time
+            }
+            
+            # 寫入資料庫
+            from trading_data_manager import trading_data_manager
+            success = trading_data_manager.record_trading_result_by_client_id(
+                order_info.get('client_order_id'), result_data
+            )
+            
+            if success:
+                logger.info(f"止損結果記錄成功: 虧損 {pnl:.4f} USDT, 持有時間: {holding_time}分鐘")
+            else:
+                logger.error(f"止損結果記錄失敗")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"記錄止損結果時出錯: {str(e)}")
+            return False
+    
+    def _calculate_holding_time(self, entry_time_str):
+        """計算持有時間（分鐘）"""
+        try:
+            if not entry_time_str:
+                return 120  # 預設2小時
+            
+            # 解析入場時間
+            entry_time = datetime.strptime(entry_time_str, '%Y-%m-%d %H:%M:%S')
+            current_time = datetime.now()
+            
+            # 計算時間差
+            time_diff = current_time - entry_time
+            holding_minutes = int(time_diff.total_seconds() / 60)
+            
+            return max(holding_minutes, 1)  # 至少1分鐘
+            
+        except Exception as e:
+            logger.error(f"計算持有時間時出錯: {str(e)}")
+            return 120  # 預設2小時
     
     def get_orders(self):
         """獲取所有訂單"""
