@@ -1,7 +1,7 @@
 """
 WebSocket連接管理模組
 處理幣安WebSocket連接和訂單狀態更新
-最終優化版本：配合signal_processor的時序修正
+修正版本：解決PARTIALLY_FILLED狀態處理問題 + 修正狀態同步到資料庫
 =============================================================================
 """
 import json
@@ -10,6 +10,7 @@ import logging
 import threading
 import traceback
 import websocket
+import sqlite3
 from datetime import datetime
 from api.binance_client import binance_client
 from config.settings import WS_BASE_URL
@@ -93,7 +94,7 @@ class WebSocketManager:
         logger.warning(f"WebSocket連接關閉: {close_status_code} - {close_msg}")
     
     def on_message(self, ws, message):
-        """WebSocket消息處理函數 - 最終優化版本"""
+        """WebSocket消息處理函數 - 修正狀態同步版本"""
         try:
             data = json.loads(message)
             
@@ -115,7 +116,7 @@ class WebSocketManager:
                 is_tp_order = client_order_id.endswith("T")
                 is_sl_order = client_order_id.endswith("S")
                 
-                # === 處理入場訂單完全成交 ===
+                # === 🔥 修正：處理入場訂單完全成交 ===
                 if (order_status == "FILLED" and not is_tp_order and not is_sl_order):
                     
                     # 🚨 過濾邏輯：只處理系統訂單
@@ -123,23 +124,31 @@ class WebSocketManager:
                         logger.info(f"檢測到非系統訂單ID: {client_order_id}，跳過自動止盈設置")
                         return
                         
-                    # 🔥 優化：嚴格檢查本地記錄，避免處理不完整的訂單
+                    # 🔥 修正：優化本地記錄檢查，增加等待機制
                     if client_order_id not in order_manager.orders:
-                        logger.warning(f"WebSocket收到訂單 {client_order_id} 成交通知，但本地記錄中未找到，可能是API響應延遲")
-                        logger.info(f"等待API響應完成後統一處理訂單 {client_order_id}")
-                        return
+                        logger.warning(f"WebSocket收到訂單 {client_order_id} 成交通知，但本地記錄中未找到")
+                        
+                        # 🔥 新增：等待API響應（最多等待2秒）
+                        for wait_count in range(4):  # 4次 x 0.5秒 = 2秒
+                            time.sleep(0.5)
+                            if client_order_id in order_manager.orders:
+                                logger.info(f"等待 {(wait_count + 1) * 0.5}秒後找到訂單記錄: {client_order_id}")
+                                break
+                        else:
+                            logger.error(f"等待2秒後仍未找到訂單 {client_order_id} 的本地記錄，跳過處理")
+                            return
                     
-                    # 🔥 優化：檢查訂單記錄的完整性
+                    # 🔥 修正：更寬鬆的訂單記錄驗證
                     order_record = order_manager.orders[client_order_id]
-                    if not self._validate_order_record(order_record, client_order_id):
-                        logger.warning(f"訂單 {client_order_id} 記錄不完整，跳過WebSocket處理")
+                    if not self._validate_order_record_relaxed(order_record, client_order_id):
+                        logger.warning(f"訂單 {client_order_id} 記錄驗證失敗，跳過WebSocket處理")
                         return
                     
                     # 🔥 核心改進：從本地記錄獲取加倉資訊，不再重新查詢
                     is_add_position = order_record.get('is_add_position', False)
                     logger.info(f"從訂單記錄獲取加倉資訊 - {symbol}: {'加倉' if is_add_position else '新開倉'}")
                     
-                    # 🔥 優化：檢查是否已經處理過，避免重複處理
+                    # 🔥 修正：檢查是否已經處理過，避免重複處理
                     current_status = order_record.get('status')
                     tp_placed = order_record.get('tp_placed', False)
                     
@@ -169,8 +178,8 @@ class WebSocketManager:
                         is_add_position=is_add_position
                     )
                 
-                # === 統一更新訂單狀態 ===
-                order_manager.update_order_status(client_order_id, order_status, executed_qty)
+                # === 🔥 修正：統一訂單狀態更新（包含資料庫同步） ===
+                self._update_order_status_with_db_sync(client_order_id, order_status, executed_qty)
                 
                 # === 處理止盈單成交 ===
                 if order_status == "FILLED" and is_tp_order:
@@ -186,9 +195,9 @@ class WebSocketManager:
             logger.error(f"處理WebSocket消息時出錯: {str(e)}")
             logger.error(traceback.format_exc())
     
-    def _validate_order_record(self, order_record, client_order_id):
+    def _validate_order_record_relaxed(self, order_record, client_order_id):
         """
-        驗證訂單記錄的完整性
+        🔥 修正：更寬鬆的訂單記錄驗證（允許PARTIALLY_FILLED狀態）
         
         Args:
             order_record: 訂單記錄字典
@@ -199,16 +208,17 @@ class WebSocketManager:
         """
         try:
             # 檢查必要欄位
-            required_fields = ['symbol', 'side', 'quantity', 'price', 'is_add_position']
+            required_fields = ['symbol', 'side', 'quantity', 'price']
             for field in required_fields:
                 if field not in order_record:
                     logger.warning(f"訂單 {client_order_id} 缺少必要欄位: {field}")
                     return False
             
-            # 檢查狀態
+            # 🔥 修正：允許更多狀態，包括PARTIALLY_FILLED
             status = order_record.get('status')
-            if status not in ['PENDING', 'NEW', 'FILLED']:
-                logger.warning(f"訂單 {client_order_id} 狀態異常: {status}")
+            valid_statuses = ['PENDING', 'NEW', 'FILLED', 'PARTIALLY_FILLED']
+            if status not in valid_statuses:
+                logger.warning(f"訂單 {client_order_id} 狀態不在允許範圍: {status} (允許: {valid_statuses})")
                 return False
             
             # 檢查價格和數量的有效性
@@ -222,17 +232,105 @@ class WebSocketManager:
                 logger.warning(f"訂單 {client_order_id} 價格或數量格式錯誤")
                 return False
             
-            # 檢查信號相關欄位
+            # 🔥 修正：is_add_position是可選欄位，提供默認值
+            if 'is_add_position' not in order_record:
+                logger.info(f"訂單 {client_order_id} 缺少is_add_position欄位，設為False")
+                order_record['is_add_position'] = False
+            
+            # 檢查信號相關欄位（非必須）
             signal_id = order_record.get('signal_id')
             if not signal_id:
-                logger.warning(f"訂單 {client_order_id} 缺少信號ID關聯")
-                # 這不是致命錯誤，繼續處理
+                logger.info(f"訂單 {client_order_id} 缺少信號ID關聯（非致命錯誤）")
             
             return True
             
         except Exception as e:
             logger.error(f"驗證訂單記錄時出錯: {str(e)}")
             return False
+    
+    def _update_order_status_with_db_sync(self, client_order_id, order_status, executed_qty):
+        """
+        🔥 修正：訂單狀態更新並同步到資料庫
+        
+        Args:
+            client_order_id: 訂單ID
+            order_status: 新狀態
+            executed_qty: 成交數量
+        """
+        try:
+            # 對所有系統訂單都更新狀態
+            if client_order_id.startswith('V69_'):
+                # 更新記憶體狀態
+                order_manager.update_order_status(client_order_id, order_status, executed_qty)
+                
+                # 🔥 關鍵修正：同步更新資料庫狀態
+                self._sync_order_status_to_database(client_order_id, order_status, executed_qty)
+                
+                # 🔥 新增：特別處理取消狀態
+                if order_status in ['CANCELED', 'CANCELLED', 'EXPIRED']:
+                    logger.info(f"🚫 訂單已取消/過期: {client_order_id} - {order_status}")
+                elif order_status == 'FILLED':
+                    logger.info(f"✅ 訂單已完全成交: {client_order_id}")
+                elif order_status == 'PARTIALLY_FILLED':
+                    logger.info(f"⏳ 訂單部分成交: {client_order_id} - {executed_qty}")
+                    
+            else:
+                # 非系統訂單，簡化log
+                if order_status == "FILLED":
+                    logger.info(f"非系統訂單完成: {client_order_id}")
+                
+        except Exception as e:
+            logger.error(f"更新訂單狀態時出錯: {str(e)}")
+    
+    def _sync_order_status_to_database(self, client_order_id, status, executed_qty=None):
+        """
+        🔥 新增：同步訂單狀態到資料庫
+        
+        Args:
+            client_order_id: 訂單ID
+            status: 訂單狀態
+            executed_qty: 成交數量（可選）
+        """
+        try:
+            from trading_data_manager import trading_data_manager
+            
+            with sqlite3.connect(trading_data_manager.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 檢查訂單是否存在於資料庫中
+                cursor.execute("SELECT id FROM orders_executed WHERE client_order_id = ?", (client_order_id,))
+                order_exists = cursor.fetchone()
+                
+                if not order_exists:
+                    logger.warning(f"⚠️  資料庫中未找到訂單: {client_order_id}，跳過狀態更新")
+                    return
+                
+                # 更新訂單狀態
+                if executed_qty is not None:
+                    cursor.execute("""
+                        UPDATE orders_executed 
+                        SET status = ?, executed_qty = ?
+                        WHERE client_order_id = ?
+                    """, (status, executed_qty, client_order_id))
+                else:
+                    cursor.execute("""
+                        UPDATE orders_executed 
+                        SET status = ?
+                        WHERE client_order_id = ?
+                    """, (status, client_order_id))
+                
+                rows_affected = cursor.rowcount
+                conn.commit()
+                
+                if rows_affected > 0:
+                    logger.info(f"📊 資料庫狀態已同步: {client_order_id} → {status}")
+                else:
+                    logger.warning(f"⚠️  資料庫狀態同步失敗: {client_order_id}")
+                    
+        except Exception as e:
+            logger.error(f"同步資料庫狀態時出錯: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _get_order_processing_info(self, client_order_id):
         """

@@ -66,7 +66,7 @@ SIGNAL_TP_MULTIPLIER = {
     'pullback_buy': 1.2,        # 回調買進 - 相對保守，回調進場風險較小
     'breakout_buy': 1.5,        # 突破買進 - 較積極，突破後有續航力
     'consolidation_buy': 1.0,   # 整理買進 - 保守，盤整階段小幅獲利
-    'reversal_buy': 1.5,        # 反轉買進 - 積極，反轉信號強烈
+    'reversal_buy': 1,          # 反轉買進 - 積極，反轉信號強烈
     'bounce_buy': 1.5,          # 反彈買進 - 中等，反彈力度適中
     'negative_div_bounce': 1.2, # 負背離反彈 - 新增
     
@@ -99,7 +99,14 @@ ENABLE_STOP_LOSS = True  # 是否啟用止損功能
 DEFAULT_LEVERAGE = 30  # 30倍槓桿
 TP_PERCENTAGE = 0.05  # 5% 默認止盈（作為備案）
 
-# 訂單超時設置 (分鐘)
+# 🔥 新增：策略專屬訂單超時設置 (分鐘)
+STRATEGY_ORDER_TIMEOUT = {
+    'reversal_buy': 180,      # 反轉買進：3小時 = 180分鐘
+    'reversal_sell': 180,     # 反轉賣出：3小時 = 180分鐘 (預留)
+    'default': 45             # 其他策略：維持45分鐘
+}
+
+# 默認訂單超時設置 (分鐘) - 保持向後相容
 ORDER_TIMEOUT_MINUTES = 45
 
 # =============================================================================
@@ -206,6 +213,33 @@ MAX_DAILY_TRADES = 50
 MAX_CONSECUTIVE_LOSSES = 5
 
 # =============================================================================
+# 🔥 新增：輔助函數
+# =============================================================================
+
+def get_strategy_timeout(signal_type):
+    """
+    根據策略類型獲取訂單超時時間
+    
+    Args:
+        signal_type (str): 策略信號類型
+        
+    Returns:
+        int: 超時時間（分鐘）
+    """
+    if not signal_type:
+        return ORDER_TIMEOUT_MINUTES
+    
+    timeout = STRATEGY_ORDER_TIMEOUT.get(signal_type, STRATEGY_ORDER_TIMEOUT['default'])
+    
+    # 記錄使用的超時設定
+    import logging
+    logger = logging.getLogger(__name__)
+    if timeout != ORDER_TIMEOUT_MINUTES:
+        logger.info(f"策略 {signal_type} 使用專屬超時設定: {timeout}分鐘")
+    
+    return timeout
+
+# =============================================================================
 # 驗證配置
 # =============================================================================
 
@@ -234,6 +268,11 @@ def validate_config():
     if not (0 <= TRADING_BLOCK_END_HOUR <= 23):
         errors.append(f"交易時間結束小時無效: {TRADING_BLOCK_END_HOUR}")
     
+    # 🔥 新增：驗證策略超時設定
+    for strategy, timeout in STRATEGY_ORDER_TIMEOUT.items():
+        if timeout <= 0 or timeout > 1440:  # 最多24小時
+            errors.append(f"策略 {strategy} 超時設定無效: {timeout}分鐘")
+    
     # 如果有錯誤，拋出異常
     if errors:
         raise ValueError("配置驗證失敗:\n" + "\n".join(f"- {error}" for error in errors))
@@ -252,6 +291,8 @@ def get_config_summary():
         "sl_enabled": ENABLE_STOP_LOSS,
         "supported_symbols": len(SYMBOL_PRECISION),
         "supported_strategies": len(SUPPORTED_STRATEGIES),
+        "strategy_timeouts": STRATEGY_ORDER_TIMEOUT,  # 🔥 新增
+        "default_timeout": ORDER_TIMEOUT_MINUTES,     # 🔥 新增
         "trading_time_block": f"{TRADING_BLOCK_START_HOUR:02d}:{TRADING_BLOCK_START_MINUTE:02d}-{TRADING_BLOCK_END_HOUR:02d}:{TRADING_BLOCK_END_MINUTE:02d}",
         "timezone": str(TW_TIMEZONE)
     }
