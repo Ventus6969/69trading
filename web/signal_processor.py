@@ -276,7 +276,7 @@ class SignalProcessor:
             price_info = self._calculate_entry_price(signal_type, opposite, open_price, close_price, prev_close, prev_open, precision)
             
             # 獲取止盈倍數
-            tp_multiplier = get_tp_multiplier(signal_type)
+            tp_multiplier = get_tp_multiplier(symbol, opposite, signal_type)
             
             return {
                 'symbol': symbol,

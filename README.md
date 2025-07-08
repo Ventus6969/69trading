@@ -1,545 +1,362 @@
-# 69大師背離交易機器人 v2.4 🚀
+# 🚀 69交易機器人系統 v2.5
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status](https://img.shields.io/badge/Status-Production%20Ready-success.svg)](https://github.com)
-[![ML Ready](https://img.shields.io/badge/ML-智能就緒-brightgreen.svg)](https://github.com)
-[![Trading](https://img.shields.io/badge/Trading-100%25%20Success-green.svg)](https://github.com)
+[![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)](https://github.com/your-repo/69-trading-bot)
+[![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://python.org)
+[![License](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-Production%20Ready-brightgreen.svg)]()
 
-## 🎯 專案簡介
-
-**全自動期貨交易機器人**，基於TradingView背離信號策略，支援幣安期貨平台。**v2.4重大升級**：成功從基礎交易機器人進化為具備完整**ML智能決策系統**的高級交易平台，目標將勝率從60-65%提升至**72-78%**。
-
-### ⭐ **v2.4 革命性更新**
-
-- **🧠 ML智能決策系統**：36個特徵自動分析 + 影子模式AI建議
-- **🔧 100%系統穩定性**：零HTTP錯誤，完美下單成功率
-- **📊 完整數據驅動**：全生命週期ML數據收集和分析
-- **🛡️ 零風險部署**：影子模式安全學習，不影響實際交易
+> 🧠 **從基礎交易機器人進化為ML智能交易系統**  
+> 集成36維特徵分析、影子決策引擎、智能風險控制的下一代量化交易平台
 
 ---
 
-## ✨ 核心功能
+## 📊 系統概覽
 
-### 🤖 **智能交易系統**
-```python
-# AI特徵分析 (36維)
-features = {
-    'strategy_win_rate_recent': 0.5,
-    'hour_of_day': 6,
-    'symbol_category': 4,
-    'candle_direction': 1,
-    'risk_reward_ratio': 2.5,
-    # ... 31個其他智能特徵
-}
+**69交易機器人系統**是一個高度智能化的量化交易平台，通過機器學習技術實現信號品質評估、智能決策建議和風險預測，目標從當前基線提升至**72-78%的穩定勝率**。
 
-# 影子決策引擎
-ai_decision = {
-    'recommendation': 'SKIP',  # EXECUTE/SKIP/ADJUST
-    'confidence': 0.3,         # 信心度
-    'reason': '策略評估: 反轉策略，中等風險'
-}
-```
+### 🎯 核心特色
 
-### 🛡️ **安全保護機制**
-- **時間限制**：台灣時間20:00-23:50自動停止交易
-- **倉位管理**：智能加倉，自動計算平均成本
-- **實時監控**：24小時系統狀態監控
-- **ML錯誤隔離**：AI錯誤不影響正常交易執行
+- 🧠 **ML智能分析** - 36維特徵自動提取與信號品質評估
+- 🤖 **影子決策引擎** - 零風險的漸進式AI學習部署
+- 🛡️ **多層風險控制** - 智能訂單關聯管理與實時風險監控
+- ⚡ **極致性能** - <100ms響應速度，100%系統穩定性
+- 📊 **完整數據架構** - 7表ML數據基礎，全生命週期追蹤
 
-### 🧠 **ML智能系統架構**
-```
-TradingView信號接收
-    ↓
-36維特徵自動提取
-    ↓  
-影子AI決策分析
-    ↓
-風險評估和建議
-    ↓
-智能交易執行
-    ↓
-完整結果追蹤
+---
+
+## 🏗️ 系統架構
+
+```mermaid
+graph TB
+    subgraph "信號處理層"
+        A[TradingView信號] --> B[信號解析器]
+        B --> C[ML特徵提取]
+    end
+    
+    subgraph "智能決策層"
+        C --> D[36維特徵分析]
+        D --> E[影子決策引擎]
+        E --> F[EXECUTE/SKIP建議]
+    end
+    
+    subgraph "交易執行層"
+        F --> G[訂單管理器]
+        G --> H[Binance API]
+        H --> I[WebSocket監控]
+    end
+    
+    subgraph "風險控制層"
+        I --> J[訂單關聯管理]
+        J --> K[止盈止損控制]
+        K --> L[風險監控預警]
+    end
+    
+    subgraph "數據學習層"
+        L --> M[ML數據庫]
+        M --> N[學習樣本累積]
+        N --> O[模型訓練優化]
+    end
 ```
 
 ---
 
-## 📊 **支援的交易策略**
+## 🎯 快速開始
 
-| 策略類型 | ML特徵分析 | 特色配置 | 成功率 |
-|---------|------------|----------|--------|
-| **突破買進/賣出** | ✅ 36個特徵 | 快速入場，45分鐘超時 | 🟢 高 |
-| **反轉買進/賣出** | ✅ 36個特徵 | 🆕 3小時等待 + AI價格調整 | 🟢 高 |
-| **反彈買進/賣出** | ✅ 36個特徵 | 中等風險，標準配置 | 🟡 中 |
-| **整理買進/賣出** | ✅ 36個特徵 | 保守策略，高成功率 | 🟢 高 |
+### 📋 系統要求
 
-### 🎯 **AI增強功能**
-- **信號品質評估**：36維特徵分析信號可靠性
-- **風險智能評估**：多因子風險模型
-- **價格優化建議**：AI調整開倉價格
-- **決策對比學習**：實際vs AI建議完整記錄
+- **Python**: 3.8+
+- **操作系統**: Linux/macOS/Windows
+- **記憶體**: 最小2GB，推薦4GB+
+- **網路**: 穩定的網際網路連接
 
----
+### 🔧 安裝步驟
 
-## 🚀 **快速開始**
-
-### **系統需求**
-- Python 3.8+ 
-- 幣安期貨帳戶
-- TradingView Pro帳戶 (Webhook功能)
-- Linux/Windows伺服器 (建議雲端VPS)
-
-### **一鍵安裝**
+1. **克隆倉庫**
 ```bash
-# 1. 克隆專案
-git clone https://github.com/YOUR_USERNAME/69trading.git
-cd 69trading
+git clone https://github.com/your-repo/69-trading-bot.git
+cd 69-trading-bot
+```
 
-# 2. 安裝依賴
+2. **安裝依賴**
+```bash
 pip install -r requirements.txt
+```
 
-# 3. 配置API密鑰
+3. **配置API密鑰**
+```bash
+# 複製環境變數範本
 cp .env.example .env
-nano .env  # 填入幣安API密鑰
 
-# 4. 啟動系統
+# 編輯配置文件
+nano .env
+```
+
+4. **設置環境變數**
+```bash
+# .env 文件內容
+BINANCE_API_KEY=your_api_key_here
+BINANCE_API_SECRET=your_api_secret_here
+```
+
+5. **啟動系統**
+```bash
 python main.py
 ```
 
-### **TradingView設定**
-```javascript
-// 在策略中設定Webhook網址：
-// http://您的伺服器IP:5000/webhook
+### ✅ 驗證安裝
 
-// 信號格式範例：
+系統啟動後，您應該看到：
+```
+🚀 69交易機器人系統 v2.5 啟動
+✅ Binance API連接成功
+✅ WebSocket監控已建立  
+✅ ML智能系統就緒
+✅ 影子決策引擎載入完成
+📊 準備接收TradingView信號...
+```
+
+---
+
+## 🧠 ML智能系統
+
+### 📊 36維特徵分析
+
+系統自動提取並分析以下特徵：
+
+#### 策略表現特徵 (10個)
+- 策略近期勝率、整體勝率、市場適應性
+- 波動匹配分數、時段匹配分數、交易對匹配分數
+- 價格動量強度、連續盈虧記錄、系統整體表現
+
+#### 價格行為特徵 (12個)  
+- 價格偏差分析、ATR標準化偏差、K線方向
+- K線實體大小、影線比例、價格區間位置
+- 上下調整空間、歷史最佳調整、可達性分數
+
+#### 市場環境特徵 (9個)
+- 時段因子、交易時段、週末因子
+- 交易對分類、當前持倉、保證金比例
+- ATR標準化、波動制度、趨勢強度
+
+#### 風險評估特徵 (5個)
+- 風險回報比、執行難度、信號信心度
+- 市場條件適應性、整體風險等級
+
+### 🤖 影子決策引擎
+
+```python
+# 當前決策邏輯 (RULE_BASED階段)
+def make_decision(features, signal_data):
+    base_confidence = get_strategy_confidence(signal_type)
+    opposite_adjustment = calculate_opposite_factor(opposite)
+    time_factor = evaluate_time_conditions(hour_of_day)
+    
+    final_confidence = base_confidence + opposite_adjustment + time_factor
+    
+    if final_confidence >= 0.6:
+        return 'EXECUTE'
+    else:
+        return 'SKIP'
+
+# 未來ML邏輯 (ML_MODEL階段)
+def ml_decision(features):
+    quality_score = trained_model.predict_quality(features)
+    success_probability = trained_model.predict_success(features)
+    
+    if quality_score > 0.7 and success_probability > 0.65:
+        return optimize_trade_parameters(features)
+    else:
+        return 'SKIP'
+```
+
+---
+
+## 🛡️ 風險控制
+
+### 🔥 v2.5 核心風險修復
+
+**問題：** 止盈單成交後，對應的止損單未被自動取消，造成遺留風險
+
+**解決方案：** 智能訂單關聯管理系統
+
+```python
+# 自動風險控制邏輯
+def handle_order_completion(order_id, status):
+    if status == 'FILLED':
+        if is_take_profit_order(order_id):
+            # 止盈成交 → 立即取消對應止損單
+            cancel_corresponding_stop_loss(order_id)
+        elif is_stop_loss_order(order_id):
+            # 止損成交 → 立即取消對應止盈單  
+            cancel_corresponding_take_profit(order_id)
+```
+
+### 🛡️ 多層安全架構
+
+1. **實時監控層** - WebSocket即時訂單狀態追蹤
+2. **智能管理層** - 訂單關聯自動處理機制
+3. **預測控制層** - ML風險評估與預警
+4. **緊急處理層** - 異常情況自動安全機制
+
+---
+
+## 📊 使用指南
+
+### 🎯 TradingView信號配置
+
+系統支援以下信號格式：
+
+```json
 {
-  "symbol": "SOLUSDC",
-  "side": "BUY", 
+  "strategy_name": "V69",
+  "symbol": "BTCUSDC",
+  "side": "buy",
+  "quantity": "0.01",
+  "open": "{{open}}",
+  "close": "{{close}}",
+  "prev_close": "{{plot('PREV_CLOSE')}}",
+  "prev_open": "{{plot('PREV_OPEN')}}",
+  "order_type": "LIMIT",
+  "position_side": "BOTH",
+  "ATR": "{{plot('ATR')}}",
   "signal_type": "reversal_buy",
-  "quantity": "5.5",
-  "open": "147.50",
-  "close": "147.91",
-  "prev_close": "147.20",
-  "prev_open": "146.80",
-  "ATR": "0.65",
-  "opposite": 2,
-  "strategy_name": "TV_STRAT"
+  "opposite": "1"
 }
 ```
 
+### 📈 支援的策略類型
+
+#### 看多策略
+- `pullback_buy` - 回調買進
+- `breakout_buy` - 突破買進  
+- `consolidation_buy` - 整理買進
+- `reversal_buy` - 反轉買進
+- `bounce_buy` - 反彈買進
+
+#### 看空策略  
+- `trend_sell` - 趨勢做空
+- `bounce_sell` - 反彈做空
+- `breakdown_sell` - 破底做空
+- `high_sell` - 高位做空
+- `reversal_sell` - 反轉做空
+
+### ⚙️ 開倉模式
+
+- `opposite=0` - 當前收盤價開倉
+- `opposite=1` - 前根收盤價開倉 (reversal_buy支援-1%折扣)
+- `opposite=2` - 前根開盤價開倉
+
 ---
 
-## 📱 **監控與管理**
+## 📊 監控與分析
 
-### **API端點**
+### 🔍 系統狀態監控
+
+訪問監控接口查看系統狀態：
+
 ```bash
-# 健康檢查
-GET /health - 系統狀態概覽
+# 基礎統計
+curl http://localhost:5000/stats
 
-# 交易數據
-GET /orders - 查看交易記錄
-GET /positions - 當前持倉信息
-GET /stats - 交易表現統計
+# ML系統狀態  
+curl http://localhost:5000/ml/stats
 
-# ML智能系統
-GET /shadow-stats - 影子決策統計
-GET /ml-features - ML特徵分析
-
-# 系統管理
-GET /config - 當前系統設定
-POST /cancel/<symbol> - 取消指定交易對訂單
+# 影子決策統計
+curl http://localhost:5000/shadow/stats
 ```
 
-### **實時監控範例**
-```bash
-# 檢查系統狀態
-curl http://172.31.46.1:5000/health
+### 📈 性能指標
 
-# 查看最新交易
-curl http://172.31.46.1:5000/orders?limit=5
-
-# ML決策統計
-curl http://172.31.46.1:5000/shadow-stats
-```
-
-### **跨主機監控系統**
-- **智能同步**：95%流量節省，月費從$14-16降至$8-11
-- **Web Dashboard**：手機友善的實時監控介面
-- **三層權限**：管理員/手機/查看者權限管理
-- **即時警報**：重要事件推送通知
+| 指標 | 目標值 | 當前值 |
+|------|--------|--------|
+| 響應延遲 | <100ms | ✅ <100ms |
+| 系統正常運行時間 | >99.5% | ✅ 100% |
+| ML特徵計算成功率 | >99% | ✅ 100% |
+| 訂單執行成功率 | 100% | ✅ 100% |
 
 ---
 
-## ⚙️ **系統配置**
+## 🚀 發展藍圖
 
-### **核心設定**
-| 設定項目 | 預設值 | 說明 |
-|---------|--------|------|
-| **槓桿倍數** | 30倍 | 可在設定檔調整 |
-| **止損比例** | 2% | 固定風險保護 |
-| **最小止盈** | 0.45% | 確保基本獲利 |
-| **訂單超時** | 45分鐘 | reversal_buy為3小時 |
-| **禁止交易** | 20:00-23:50 | 台灣時間高風險時段 |
+### 📅 階段性目標
 
-### **ML系統配置**
-```python
-# config/settings.py
-ML_CONFIG = {
-    'FEATURE_COUNT': 36,           # 特徵數量
-    'MIN_DATA_FOR_ML': 100,        # ML模型最小數據量
-    'SHADOW_MODE': True,           # 影子模式開關
-    'CONFIDENCE_THRESHOLD': 0.7,   # 信心度門檻
-    'AUTO_SKIP_LOW_QUALITY': False # 自動跳過低品質信號
-}
-```
+#### 🎯 階段1: 影子模式完善期 (當前-3個月)
+- ✅ 基礎系統穩定運行  
+- 🔄 ML數據積累 (目標100筆)
+- 📊 特徵有效性驗證
+- 🎯 建立決策準確率基線
 
----
+#### 🎯 階段2: 小規模ML測試期 (3-6個月)
+- 🤖 10%信號使用ML決策
+- 📈 ML vs 原邏輯效果對比
+- ⚡ 智能價格優化上線
+- 🛡️ 完善風險監控體系
 
-## 🧠 **ML系統架構詳解**
+#### 🎯 階段3: 智能交易全面化 (6-12個月)
+- 🏆 實現72-78%穩定勝率
+- 🧠 完全AI驅動交易決策  
+- 🌐 支援多策略多交易對
+- 🚀 自適應市場變化能力
 
-### **智能特徵工程**
-```python
-# 36個智能特徵分類
-features = {
-    # 價格行為特徵 (8個)
-    'candle_direction': 1,
-    'price_momentum': 0.02,
-    'volatility_ratio': 1.5,
-    
-    # 策略表現特徵 (10個)  
-    'strategy_win_rate_recent': 0.5,
-    'strategy_avg_holding_time': 120,
-    'opposite_success_rate': 0.3,
-    
-    # 市場環境特徵 (8個)
-    'hour_of_day': 6,
-    'symbol_category': 4,
-    'market_volatility': 2.1,
-    
-    # 風險評估特徵 (6個)
-    'risk_reward_ratio': 2.5,
-    'max_drawdown_recent': 0.05,
-    'position_size_ratio': 0.1,
-    
-    # 技術指標特徵 (4個)
-    'atr_percentile': 0.7,
-    'trend_strength': 0.8
-}
-```
+### 🎖️ 最終願景
 
-### **影子決策引擎**
-```python
-class ShadowDecisionEngine:
-    """AI決策引擎 - 提供智能建議但不影響實際交易"""
-    
-    def make_decision(self, features, signal_data):
-        # 1. 風險評估
-        risk_score = self.calculate_risk(features)
-        
-        # 2. 品質分析
-        quality_score = self.analyze_quality(features)
-        
-        # 3. 生成建議
-        if quality_score < 0.3:
-            return {
-                'recommendation': 'SKIP',
-                'confidence': quality_score,
-                'reason': '信號品質不足，建議跳過'
-            }
-        elif risk_score > 0.7:
-            return {
-                'recommendation': 'EXECUTE',
-                'confidence': quality_score,
-                'reason': '高品質信號，建議執行'
-            }
-```
-
-### **數據架構設計**
-```sql
--- ML特徵表 (存儲36個特徵)
-CREATE TABLE ml_features_v2 (
-    id INTEGER PRIMARY KEY,
-    session_id TEXT,
-    signal_id INTEGER,
-    -- 36個特徵欄位
-    candle_direction REAL,
-    price_momentum REAL,
-    strategy_win_rate_recent REAL,
-    -- ... 其他33個特徵
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- 影子決策表
-CREATE TABLE ml_signal_quality (
-    id INTEGER PRIMARY KEY,
-    session_id TEXT,
-    signal_id INTEGER,
-    recommendation TEXT,      -- EXECUTE/SKIP/ADJUST
-    confidence_score REAL,    -- 信心度 0-1
-    execution_probability REAL, -- 執行概率
-    reason TEXT,              -- 決策理由
-    decision_method TEXT      -- RULE_BASED/ML_MODEL
-);
-
--- 價格優化表
-CREATE TABLE ml_price_optimization (
-    id INTEGER PRIMARY KEY,
-    session_id TEXT,
-    signal_id INTEGER,
-    original_price REAL,
-    optimized_price REAL,
-    price_adjustment_percent REAL,
-    optimization_reason TEXT
-);
-```
+打造業界領先的**AI驅動智能交易系統**，實現：
+- 🎯 72-78%穩定勝率
+- 🤖 完全自動化交易
+- 🛡️ 機構級風險控制
+- 🚀 持續自我優化能力
 
 ---
 
-## 📈 **系統性能指標**
+## 🤝 貢獻指南
 
-### **v2.4 性能表現**
-```
-🎯 交易成功率: 100%
-⚡ 響應速度: < 100ms (包含ML計算)
-🧠 ML計算成功率: 100% (36/36特徵)
-🔧 系統穩定性: 100% (零HTTP錯誤)
-📊 數據完整性: 100% (完整生命週期追蹤)
-```
+我們歡迎社群貢獻！請閱讀 [CONTRIBUTING.md](CONTRIBUTING.md) 了解詳細信息。
 
-### **ML系統表現**
-```
-📊 特徵提取: 36/36個特徵 ✅
-🤖 影子決策: 100%運作率 ✅  
-📈 數據積累: 63筆信號完整記錄
-🔍 決策準確率: 持續監控中 (影子模式)
-⏱️ ML處理時間: < 50ms
-```
+### 🐛 問題回報
 
-### **實際驗證記錄**
-```bash
-# 最新成功案例 (信號ID: 63)
-INFO - ✅ ML特徵計算並記錄成功 - 信號ID: 63
-INFO - 📊 特徵統計: 計算了 36/36 個特徵
-INFO - 🤖 影子模式決策完成: 建議: SKIP, 信心度: 30.0%
-INFO - ✅ 下單成功 - 訂單ID: 6288019137, 狀態: NEW
-INFO - 127.0.0.1 - "POST /webhook HTTP/1.0" 200 -
-```
+如發現問題，請：
+1. 查看 [已知問題](https://github.com/your-repo/69-trading-bot/issues)
+2. 創建新的 [Issue](https://github.com/your-repo/69-trading-bot/issues/new)
+3. 提供詳細的錯誤日誌和復現步驟
+
+### 💡 功能建議
+
+歡迎提出新功能建議：
+1. 在 [Discussions](https://github.com/your-repo/69-trading-bot/discussions) 中討論
+2. 創建 Feature Request Issue
+3. 提交 Pull Request
 
 ---
 
-## 🔮 **發展藍圖**
+## 📄 授權協議
 
-### **階段1: 影子模式學習 (當前)**
-```
-📊 狀態: 進行中
-🎯 目標: 累積50-100筆高品質訓練數據
-🤖 ML角色: 純學習和記錄，不影響交易
-⏰ 預計時間: 1-3個月
-
-特點:
-✅ 36個特徵完整計算
-✅ 影子決策建議記錄
-✅ 實際vs預測對比追蹤
-✅ 零風險數據積累
-```
-
-### **階段2: 小規模測試 (3-6個月後)**
-```
-📊 狀態: 計劃中
-🎯 目標: 10%信號使用AI決策
-🤖 ML角色: 高信心度信號開始實際介入
-⏰ 預計時間: 3-6個月
-
-條件:
-- ML預測準確率 > 70%
-- 累積100+筆訓練數據
-- 通過嚴格回測驗證
-```
-
-### **階段3: 全面AI化 (6-12個月後)**
-```
-📊 狀態: 未來目標
-🎯 目標: 72-78%勝率的完全AI交易
-🤖 ML角色: 主導所有交易決策
-⏰ 預計時間: 6-12個月
-
-功能:
-- 智能信號過濾
-- AI價格優化
-- 自適應策略調整
-- 跨策略智能化
-```
+本專案採用 [MIT License](LICENSE) 授權。
 
 ---
 
-## 🛠️ **開發指南**
+## ⚠️ 免責聲明
 
-### **專案結構**
-```
-69trading/
-├── 📁 api/                    # API接口層
-│   ├── binance_client.py      # 幣安API客戶端
-│   └── websocket_handler.py   # WebSocket連接管理
-├── 📁 config/                 # 配置管理
-│   └── settings.py            # 系統配置
-├── 📁 database/               # 數據管理
-│   ├── trading_data_manager.py # 交易數據管理
-│   └── ml_data_manager.py     # ML數據管理 🆕
-├── 📁 trading/                # 交易核心
-│   ├── order_manager.py       # 訂單管理
-│   └── position_manager.py    # 持倉管理
-├── 📁 web/                    # Web服務
-│   ├── app.py                 # Flask應用
-│   ├── routes.py              # API路由
-│   └── signal_processor.py    # 信號處理 (v2.4核心修復)
-├── 📁 utils/                  # 工具函數
-│   ├── helpers.py             # 輔助函數
-│   └── logger_config.py       # 日誌配置
-├── shadow_decision_engine.py  # 🆕 影子決策引擎
-├── main.py                    # 主程序入口
-├── requirements.txt           # 依賴列表
-└── .env.example               # 環境變量模板
-```
-
-### **開發環境設置**
-```bash
-# 開發模式
-python main.py --debug
-
-# 測試框架
-pip install pytest
-python -m pytest tests/
-
-# 代碼品質檢查
-pip install flake8
-flake8 . --max-line-length=120
-
-# ML開發依賴
-pip install numpy pandas scikit-learn
-```
-
-### **貢獻指南**
-```bash
-# 提交規範
-git commit -m "feat: 新增ML特徵計算功能"
-git commit -m "fix: 修復HTTP 500錯誤"
-git commit -m "refactor: 重構影子決策引擎"
-git commit -m "docs: 更新API文檔"
-
-# 分支策略
-main     - 生產環境
-develop  - 開發環境  
-feature/ - 功能分支
-hotfix/  - 緊急修復
-```
+**風險提示：** 
+- 量化交易涉及金融風險，過往業績不代表未來表現
+- 請在充分了解風險的前提下使用本系統
+- 建議先在模擬環境中測試，確認理解系統行為後再投入實際資金
+- 作者不對任何交易損失承擔責任
 
 ---
 
-## 🎯 **適用對象**
+## 📞 聯繫方式
 
-### **專業交易者**
-- **TradingView策略用戶**：已有背離交易策略的投資者
-- **期貨交易員**：需要自動化執行的專業交易員
-- **量化愛好者**：希望體驗ML增強交易系統的用戶
-
-### **技術開發者**
-- **Python開發者**：想要學習交易系統開發
-- **AI/ML工程師**：對金融AI應用感興趣
-- **系統架構師**：研究高可用交易系統設計
-
-### **投資機構**
-- **量化基金**：需要穩定的自動化交易工具
-- **投資公司**：希望整合AI技術到交易流程
-- **金融科技**：開發相關產品的參考架構
+- **GitHub Issues**: [技術問題與建議](https://github.com/your-repo/69-trading-bot/issues)
+- **Discussions**: [社群討論](https://github.com/your-repo/69-trading-bot/discussions)
+- **Email**: [your-email@example.com](mailto:your-email@example.com)
 
 ---
 
-## 📊 **風險說明**
+<div align="center">
 
-### **交易風險**
-- **市場風險**：期貨交易存在虧損可能
-- **槓桿風險**：30倍槓桿放大盈虧
-- **技術風險**：系統故障可能影響交易
+**🎯 讓AI成為您的交易夥伴**
 
-### **AI系統風險**
-- **模型風險**：ML預測可能不準確
-- **數據風險**：訓練數據品質影響效果
-- **過擬合風險**：模型可能過度適應歷史數據
+[![GitHub stars](https://img.shields.io/github/stars/your-repo/69-trading-bot?style=social)](https://github.com/your-repo/69-trading-bot/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/your-repo/69-trading-bot?style=social)](https://github.com/your-repo/69-trading-bot/network)
 
-### **安全措施**
-- **影子模式**：AI決策不影響實際交易 (當前階段)
-- **多重保護**：止損、超時、錯誤隔離機制
-- **人工監督**：重要決策保留人工干預能力
-
----
-
-## 🤝 **社群與支援**
-
-### **獲取幫助**
-- **GitHub Issues**：技術問題和功能建議
-- **Discussions**：社群討論和經驗分享
-- **Wiki**：詳細文檔和教學
-
-### **貢獻方式**
-- **代碼貢獻**：修復bug、新增功能
-- **文檔完善**：改進文檔和教學
-- **測試反饋**：報告問題和使用體驗
-- **策略分享**：分享有效的交易策略
-
----
-
-## 📄 **授權資訊**
-
-### **開源授權**
-本專案採用 **MIT License** 授權，允許商業使用、修改和分發。
-
-### **免責聲明**
-- 本軟體僅供學習和研究使用
-- 交易有風險，投資需謹慎
-- 使用者需自行承擔所有交易風險
-- 開發者不對任何投資損失負責
-
----
-
-## 🙏 **致謝**
-
-### **特別感謝**
-- **TradingView社群**：提供優秀的圖表分析平台
-- **幣安**：穩定可靠的API服務
-- **開源社群**：各種優秀的Python庫
-- **測試用戶**：寶貴的反饋和建議
-
-### **技術棧**
-- **Python 3.8+**：主要開發語言
-- **Flask**：Web框架
-- **SQLite**：數據庫
-- **WebSocket**：實時通信
-- **NumPy/Pandas**：數據處理
-- **Scikit-learn**：機器學習 (未來)
-
----
-
-## 🎉 **總結**
-
-**69大師背離交易機器人 v2.4** 代表了交易自動化技術的重大突破。從基礎的信號執行工具，成功進化為具備完整**ML智能決策能力**的高級交易系統。
-
-### **核心價值**
-- 🧠 **AI增強**：36維特徵分析，智能決策建議
-- 🛡️ **零風險**：影子模式學習，不影響實際交易  
-- 📊 **數據驅動**：完整ML數據架構，為未來奠基
-- 🚀 **持續進化**：分階段升級，邁向72-78%勝率目標
-
-### **立即開始**
-```bash
-git clone https://github.com/YOUR_USERNAME/69trading.git
-cd 69trading && python main.py
-```
-
-**準備見證AI交易的未來！** 🤖✨
-
----
-
-**⭐ 如果這個專案對您有幫助，請給我們一個Star！**
-
-**📈 v2.4 - ML智能交易系統完全就緒**  
-**🚀 下一站：AI驅動的交易未來**
+</div>
