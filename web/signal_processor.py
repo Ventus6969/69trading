@@ -473,9 +473,9 @@ class SignalProcessor:
             logger.error(f"保存webhook數據時出錯: {str(e)}")
     
     def _create_and_execute_order(self, parsed_signal, tp_params, position_decision, signal_id, signal_start_time):
-        """創建並執行訂單 - 修復方法錯誤"""
+        """創建並執行訂單 - 修復HTTP 500錯誤版本"""
         try:
-            # 確保交易方向是大寫
+            # 🔥 修復1：確保交易方向是大寫
             parsed_signal['side'] = parsed_signal['side'].upper()
 
             # 生成訂單ID
@@ -494,9 +494,9 @@ class SignalProcessor:
             price_info = parsed_signal.get('price_info', {})
             
             logger.info(f"準備下單詳情 - 交易對: {parsed_signal['symbol']}, "
-                       f"方向: {parsed_signal['side']}, 設定精度: {parsed_signal['precision']}")
+                    f"方向: {parsed_signal['side']}, 設定精度: {parsed_signal['precision']}")
             logger.info(f"開倉價格: {parsed_signal['price']}, 數量: {parsed_signal['quantity']}, "
-                       f"槓桿: {DEFAULT_LEVERAGE}x")
+                    f"槓桿: {DEFAULT_LEVERAGE}x")
             logger.info(f"止盈倍數: {parsed_signal['tp_multiplier']}, 開倉模式: {entry_mode}")
             
             # 🔥 新增：影子決策信息日誌
@@ -543,7 +543,7 @@ class SignalProcessor:
             # 保存訂單信息到order_manager
             order_manager.save_order_info(client_order_id, order_data)
             
-            # 🔥 修復：使用正確的方法名稱和參數
+            # 🔥 修復2：使用正確的方法名稱和參數，添加必要的 time_in_force
             order_result = order_manager.create_order(
                 symbol=parsed_signal['symbol'],
                 side=parsed_signal['side'],
@@ -551,13 +551,21 @@ class SignalProcessor:
                 quantity=parsed_signal['quantity'],
                 price=parsed_signal['price'],
                 client_order_id=client_order_id,
-                position_side=parsed_signal['position_side']
+                position_side=parsed_signal['position_side'],
+                time_in_force='GTC'  # 🔥 添加必要的參數
             )
             
             # 計算執行延遲
             execution_delay_ms = int((time.time() - signal_start_time) * 1000)
             
-            if order_result and order_result.get('status') == 'success':
+            # 🔥 修復3：正確判斷API返回結果
+            if order_result:  # 只要API有返回就算成功
+                # 記錄詳細的成功信息
+                logger.info(f"✅ 下單成功 - 訂單ID: {order_result.get('orderId')}, 狀態: {order_result.get('status')}")
+                
+                # 記錄訂單到資料庫
+                trading_data_manager.record_order_executed(signal_id, order_data)
+                
                 return {
                     "status": "success",
                     "message": f"訂單創建成功 - {parsed_signal['symbol']} {parsed_signal['side']}",
@@ -565,8 +573,9 @@ class SignalProcessor:
                     "side": parsed_signal['side'],
                     "quantity": parsed_signal['quantity'],
                     "price": parsed_signal['price'],
-                    "order_id": order_result.get('order_id', 'UNKNOWN'),
+                    "order_id": order_result.get('orderId', 'UNKNOWN'),  # 🔥 使用正確的字段名
                     "client_order_id": client_order_id,
+                    "binance_status": order_result.get('status', 'UNKNOWN'),  # 🔥 記錄實際API狀態
                     "atr_value": parsed_signal['atr_value'],
                     "tp_price_offset": tp_params['tp_price_offset'],
                     "tp_multiplier": tp_params['tp_multiplier'],
@@ -580,14 +589,27 @@ class SignalProcessor:
                 }
             else:
                 # 下單失敗，更新狀態
+                logger.error(f"❌ 下單失敗 - API無返回")
                 if client_order_id in order_manager.orders:
                     order_manager.orders[client_order_id]['status'] = 'FAILED'
-                return {"status": "error", "message": "下單失敗", "signal_id": signal_id}
+                return {
+                    "status": "error", 
+                    "message": "下單失敗 - API無返回", 
+                    "signal_id": signal_id,
+                    "client_order_id": client_order_id,
+                    "error_type": "API_NO_RESPONSE"
+                }
         
         except Exception as e:
-            logger.error(f"創建訂單時出錯: {str(e)}")
+            logger.error(f"❌ 創建訂單時出錯: {str(e)}")
             logger.error(traceback.format_exc())
-            return {"status": "error", "message": str(e), "signal_id": signal_id}
+            return {
+                "status": "error", 
+                "message": f"下單異常: {str(e)}", 
+                "signal_id": signal_id,
+                "error_type": "EXCEPTION",
+                "error_details": str(e)
+            }
     
     def _generate_order_id(self, parsed_signal):
         """生成訂單ID"""
@@ -634,3 +656,4 @@ class SignalProcessor:
 
 # 創建全局信號處理器實例
 signal_processor = SignalProcessor()
+
