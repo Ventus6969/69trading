@@ -7,7 +7,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
-from database import trading_data_manager, ml_data_manager
+from database import trading_data_manager
 
 # 設置logger
 logger = logging.getLogger(__name__)
@@ -32,11 +32,13 @@ class ShadowModeDecisionEngine:
         當前已知結果：
         - consolidation_buy + opposite=2: 執行失敗 (多筆)
         - breakdown_sell + opposite=0: 執行成功 + 獲利 (1筆)
+        - reversal_buy + opposite=2: 執行失敗 (多筆)
         """
         return {
             # 高風險組合 - 已知執行率低
             'high_risk_combinations': [
                 {'signal_type': 'consolidation_buy', 'opposite': 2, 'risk_level': 'HIGH'},
+                {'signal_type': 'reversal_buy', 'opposite': 2, 'risk_level': 'HIGH'},
                 # 可以根據更多數據添加其他高風險組合
             ],
             
@@ -99,6 +101,9 @@ class ShadowModeDecisionEngine:
     def _should_use_ml_model(self) -> bool:
         """檢查是否應該使用ML模型"""
         try:
+            # 延遲導入，確保使用最新實例
+            from database import ml_data_manager
+            
             # 檢查訓練數據數量
             stats = ml_data_manager.get_ml_table_stats()
             total_features = stats.get('total_ml_features', 0)
@@ -129,60 +134,52 @@ class ShadowModeDecisionEngine:
         opposite = signal_data.get('opposite', 0)
         symbol = signal_data.get('symbol', '')
         
-        # 檢查高風險組合
-        for risk_combo in self.strategy_rules['high_risk_combinations']:
-            if (signal_type == risk_combo['signal_type'] and 
-                opposite == risk_combo['opposite']):
+        # 1. 檢查是否為已知高風險組合
+        for high_risk in self.strategy_rules['high_risk_combinations']:
+            if (signal_type == high_risk['signal_type'] and 
+                opposite == high_risk['opposite']):
                 return {
                     'recommendation': 'SKIP',
-                    'confidence': 0.8,
+                    'confidence': 0.3,
                     'reason': f'已知高風險組合: {signal_type} + opposite={opposite}',
                     'risk_level': 'HIGH',
-                    'execution_probability': 0.2,
-                    'trading_probability': None,
+                    'execution_probability': 0.3,
+                    'trading_probability': 0.3,
                     'suggested_price_adjustment': 0.0
                 }
         
-        # 檢查高品質組合
-        for quality_combo in self.strategy_rules['high_quality_combinations']:
-            if (signal_type == quality_combo['signal_type'] and 
-                opposite == quality_combo['opposite']):
+        # 2. 檢查是否為已知高品質組合
+        for high_quality in self.strategy_rules['high_quality_combinations']:
+            if (signal_type == high_quality['signal_type'] and 
+                opposite == high_quality['opposite']):
                 return {
                     'recommendation': 'EXECUTE',
-                    'confidence': 0.9,
+                    'confidence': 0.8,
                     'reason': f'已知高品質組合: {signal_type} + opposite={opposite}',
                     'risk_level': 'LOW',
-                    'execution_probability': 1.0,
-                    'trading_probability': 1.0,
+                    'execution_probability': 0.8,
+                    'trading_probability': 0.8,
                     'suggested_price_adjustment': 0.0
                 }
         
-        # 根據策略偏好給出默認建議
+        # 3. 基於策略偏好評估
         strategy_pref = self.strategy_rules['strategy_preferences'].get(signal_type, {})
-        default_confidence = strategy_pref.get('default_confidence', 0.5)
-        strategy_note = strategy_pref.get('note', '未知策略')
+        base_confidence = strategy_pref.get('default_confidence', 0.5)
         
-        # 基於opposite值調整信心度
-        confidence_adjustment = self._calculate_opposite_adjustment(opposite)
-        final_confidence = min(1.0, default_confidence + confidence_adjustment)
+        # 4. 基於opposite值調整信心度
+        opposite_adjustment = self._calculate_opposite_adjustment(opposite)
+        final_confidence = max(0.1, min(0.9, base_confidence + opposite_adjustment))
         
-        # 決策邏輯
-        if final_confidence >= self.confidence_threshold:
-            recommendation = 'EXECUTE'
-            execution_prob = final_confidence
-            trading_prob = final_confidence * 0.8  # 保守估計
-        else:
-            recommendation = 'SKIP'
-            execution_prob = final_confidence
-            trading_prob = None
+        # 5. 生成決策
+        recommendation = 'EXECUTE' if final_confidence >= self.confidence_threshold else 'SKIP'
         
         return {
             'recommendation': recommendation,
             'confidence': final_confidence,
-            'reason': f'策略評估: {strategy_note}, opposite調整: {confidence_adjustment:+.2f}',
+            'reason': f"策略評估: {strategy_pref.get('note', '未知策略')}, opposite調整: {opposite_adjustment:+.2f}",
             'risk_level': 'MEDIUM',
-            'execution_probability': execution_prob,
-            'trading_probability': trading_prob,
+            'execution_probability': final_confidence,
+            'trading_probability': final_confidence,
             'suggested_price_adjustment': 0.0
         }
     
@@ -202,7 +199,7 @@ class ShadowModeDecisionEngine:
         elif opposite == 1:
             return 0.0  # 前根收盤價，中性
         elif opposite == 2:
-            return -0.2  # 前根開盤價，已知問題較多
+            return -0.1  # 前根開盤價，已知問題較多
         else:
             return -0.1  # 未知值，保守處理
     
@@ -234,18 +231,24 @@ class ShadowModeDecisionEngine:
     def _record_shadow_decision(self, session_id: str, signal_id: int, 
                                decision_result: Dict[str, Any], features: Dict[str, Any], 
                                signal_data: Dict[str, Any]) -> bool:
-        """記錄影子決策到資料庫"""
+        """記錄影子決策到資料庫 - 修復版本"""
         try:
-            quality_result = {
-                'profit_probability': decision_result.get('trading_probability'),
-                'quality_score': decision_result.get('confidence'),
-                'confidence_level': decision_result.get('confidence'),
+            # 延遲導入，確保使用最新實例
+            from database import ml_data_manager
+            
+            # 🔥 修復：調整參數格式以匹配 record_signal_quality_assessment 方法
+            assessment_result = {
+                'decision_method': decision_result.get('decision_method', 'RULE_BASED'),
                 'recommendation': decision_result.get('recommendation'),
-                'reasoning': decision_result.get('reason'),
+                'confidence_score': decision_result.get('confidence'),
+                'execution_probability': decision_result.get('execution_probability'),
+                'reason': decision_result.get('reason'),
+                'reasoning_details': decision_result.get('reason'),  # 詳細理由
                 'model_version': f"shadow_v1.0_{decision_result.get('decision_method', 'RULE')}"
             }
             
-            success = ml_data_manager.record_signal_quality(session_id, signal_id, quality_result)
+            # 🔥 修復：使用正確的方法名稱
+            success = ml_data_manager.record_signal_quality_assessment(session_id, signal_id, assessment_result)
             
             if success:
                 logger.info(f"✅ 影子決策已記錄 - signal_id: {signal_id}")
@@ -289,6 +292,9 @@ class ShadowModeDecisionEngine:
     def get_shadow_statistics(self) -> Dict[str, Any]:
         """獲取影子模式統計"""
         try:
+            # 延遲導入，確保使用最新實例
+            from database import ml_data_manager
+            
             stats = ml_data_manager.get_ml_table_stats()
             
             return {

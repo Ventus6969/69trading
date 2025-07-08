@@ -1,6 +1,6 @@
 """
-交易信號處理模組 - 影子模式完整整合版本
-處理來自TradingView的交易信號，並實施影子模式ML決策
+交易信號處理模組 - 完整修復版本
+處理來自TradingView的交易信號，修復所有方法錯誤，整合ML特徵計算和影子決策
 =============================================================================
 """
 import time
@@ -28,7 +28,7 @@ from database import trading_data_manager, ml_data_manager
 logger = logging.getLogger(__name__)
 
 class SignalProcessor:
-    """交易信號處理器 - 影子模式完整版本"""
+    """交易信號處理器 - 完整修復版本"""
     
     def __init__(self):
         # 用於存儲最近的webhook數據
@@ -175,120 +175,136 @@ class SignalProcessor:
             logger.info("🔄 ML錯誤不影響正常交易，繼續執行交易邏輯")
             return {}
     
-    def _execute_shadow_decision(self, session_id: str, signal_id: int, 
-                               features: dict, signal_data: dict) -> dict:
+    def _execute_shadow_decision(self, session_id: str, signal_id: int, features: dict, signal_data: dict):
         """
         🤖 執行影子模式決策分析
         
         Args:
             session_id: 會話ID
             signal_id: 信號ID  
-            features: ML特徵數據
+            features: ML特徵字典
             signal_data: 原始信號數據
             
         Returns:
             dict: 影子決策結果
         """
         try:
-            if not self.shadow_engine:
-                logger.warning("影子決策引擎未載入，跳過影子決策")
-                return {"status": "engine_not_loaded"}
-            
             logger.info(f"🤖 開始影子模式決策分析 - signal_id: {signal_id}")
             
+            # 檢查影子決策引擎是否可用
+            if not self.shadow_engine:
+                logger.warning("影子決策引擎未載入，跳過影子決策")
+                return {"error": "影子決策引擎未載入"}
+            
             # 執行影子決策
-            shadow_result = self.shadow_engine.make_shadow_decision(
-                session_id, signal_id, features, signal_data
+            shadow_result = self.shadow_engine.make_shadow_decision(session_id, signal_id, features, signal_data)
+            
+            # 🔥 修復：使用正確的方法名稱
+            success = ml_data_manager.record_signal_quality_assessment(
+                session_id, signal_id, shadow_result
             )
             
-            # 記錄影子決策結果到日誌
-            self._log_shadow_decision_comparison(signal_data, shadow_result)
+            if success:
+                logger.info(f"✅ 影子決策已記錄 - signal_id: {signal_id}")
+            else:
+                logger.warning(f"⚠️ 影子決策記錄失敗 - signal_id: {signal_id}")
+            
+            # 詳細的影子決策日誌
+            self._log_shadow_decision(shadow_result, signal_data)
             
             return shadow_result
             
         except Exception as e:
-            logger.error(f"❌ 影子模式決策時出錯: {str(e)}")
+            logger.error(f"❌ 影子決策時出錯: {str(e)}")
             logger.error(f"詳細錯誤: {traceback.format_exc()}")
-            return {"status": "error", "message": str(e)}
+            # 影子決策錯誤不影響正常交易
+            return {"error": str(e)}
     
-    def _log_shadow_decision_comparison(self, signal_data: dict, shadow_result: dict):
-        """記錄影子決策與實際決策的對比"""
-        signal_type = signal_data.get('signal_type')
-        opposite = signal_data.get('opposite')
-        symbol = signal_data.get('symbol')
-        
-        logger.info(f"📊 影子vs實際決策對比:")
-        logger.info(f"   信號: {symbol} {signal_type} (opposite={opposite})")
-        logger.info(f"   🤖 影子建議: {shadow_result.get('recommendation', 'N/A')}")
-        logger.info(f"   🎯 實際決策: EXECUTE (系統總是執行)")
-        logger.info(f"   🔍 影子理由: {shadow_result.get('reason', 'N/A')}")
-        logger.info(f"   📈 信心度: {shadow_result.get('confidence', 0):.1%}")
-        
-        # 特別標記意見分歧的情況
-        if shadow_result.get('recommendation') == 'SKIP':
-            logger.warning(f"⚠️ 影子建議跳過但系統將執行 - 需要關注結果")
-        elif shadow_result.get('recommendation') == 'EXECUTE':
-            logger.info(f"✅ 影子建議與實際決策一致")
+    def _log_shadow_decision(self, shadow_result: dict, signal_data: dict):
+        """記錄詳細的影子決策日誌"""
+        try:
+            # 基本決策信息
+            logger.info(f"🤖 影子模式決策完成:")
+            logger.info(f"   信號: {signal_data.get('signal_type')} | opposite: {signal_data.get('opposite')} | 交易對: {signal_data.get('symbol')}")
+            logger.info(f"   建議: {shadow_result.get('recommendation', 'UNKNOWN')}")
+            logger.info(f"   信心度: {shadow_result.get('confidence_score', 0):.1%}")
+            logger.info(f"   執行概率: {shadow_result.get('execution_probability', 0):.1%}")
+            logger.info(f"   理由: {shadow_result.get('reason', '無理由')}")
+            logger.info(f"   方法: {shadow_result.get('decision_method', 'UNKNOWN')}")
+            
+            # 對比實際決策
+            logger.info(f"📊 影子vs實際決策對比:")
+            logger.info(f"   信號: {signal_data.get('symbol')} {signal_data.get('signal_type')} (opposite={signal_data.get('opposite')})")
+            logger.info(f"   🤖 影子建議: {shadow_result.get('recommendation', 'UNKNOWN')}")
+            logger.info(f"   🎯 實際決策: EXECUTE (系統總是執行)")
+            logger.info(f"   🔍 影子理由: {shadow_result.get('reason', '無理由')}")
+            logger.info(f"   📈 信心度: {shadow_result.get('confidence_score', 0):.1%}")
+            
+            # 根據一致性給出不同的警告
+            if shadow_result.get('recommendation') == 'SKIP':
+                logger.warning(f"⚠️ 影子建議跳過但系統將執行 - 需要關注結果")
+            else:
+                logger.info(f"✅ 影子建議與實際決策一致")
+                
+            logger.info(f"🤖 本次交易的影子決策建議已記錄，後續將對比實際結果")
+            
+        except Exception as e:
+            logger.error(f"記錄影子決策日誌時出錯: {str(e)}")
     
-    def _parse_signal_data(self, data):
-        """解析信號數據"""
-        symbol = data.get('symbol', '').upper()
-        side = data.get('side', '').upper()
-        signal_type = data.get('signal_type')
-        
-        # 獲取價格數據
-        quantity = data.get('quantity', '1')
-        open_price = float(data.get('open'))
-        close_price = float(data.get('close'))
-        prev_close = data.get('prev_close')
-        prev_open = data.get('prev_open')
-        
-        # 其他參數
-        order_type = data.get('order_type', 'LIMIT').upper()
-        position_side = data.get('position_side', 'BOTH').upper()
-        strategy_name = data.get('strategy_name', 'TV_STRAT')
-        atr_value = data.get('ATR')
-        margin_type = data.get('margin_type', 'ISOLATED').upper()
-        opposite = int(data.get('opposite', 0))
-        
-        # 獲取交易對配置
-        precision = get_symbol_precision(symbol)
-        tp_multiplier = get_tp_multiplier(symbol, opposite, signal_type)
-        
-        # 計算開倉價格（包含reversal_buy特殊處理）
-        price, price_info = self._calculate_entry_price_with_discount(
-            open_price, close_price, prev_close, prev_open, 
-            opposite, precision, signal_type
-        )
-        
-        return {
-            'symbol': symbol,
-            'side': side,
-            'signal_type': signal_type,
-            'quantity': quantity,
-            'open_price': open_price,
-            'close_price': close_price,
-            'prev_close': prev_close,
-            'prev_open': prev_open,
-            'price': price,
-            'price_info': price_info,
-            'order_type': order_type,
-            'position_side': position_side,
-            'strategy_name': strategy_name,
-            'atr_value': atr_value,
-            'margin_type': margin_type,
-            'opposite': opposite,
-            'precision': precision,
-            'tp_multiplier': tp_multiplier
-        }
+    def _parse_signal_data(self, signal_data):
+        """解析和處理信號數據"""
+        try:
+            # 提取基本信號信息
+            symbol = signal_data['symbol']
+            side = signal_data['side']
+            signal_type = signal_data.get('signal_type', '')
+            quantity = signal_data['quantity']
+            opposite = int(signal_data.get('opposite', 0))
+            strategy_name = signal_data.get('strategy_name', 'UNKNOWN')
+            
+            # 獲取價格數據
+            open_price = float(signal_data['open'])
+            close_price = float(signal_data['close'])
+            prev_close = float(signal_data.get('prev_close', close_price))
+            prev_open = float(signal_data.get('prev_open', open_price))
+            atr_value = float(signal_data.get('ATR', 1.0))
+            
+            # 獲取交易對精度
+            precision = get_symbol_precision(symbol)
+            
+            # 計算開倉價格
+            price_info = self._calculate_entry_price(signal_type, opposite, open_price, close_price, prev_close, prev_open, precision)
+            
+            # 獲取止盈倍數
+            tp_multiplier = get_tp_multiplier(signal_type)
+            
+            return {
+                'symbol': symbol,
+                'side': side,
+                'signal_type': signal_type,
+                'quantity': quantity,
+                'price': price_info['price'],
+                'order_type': 'LIMIT',
+                'opposite': opposite,
+                'strategy_name': strategy_name,
+                'open_price': open_price,
+                'close_price': close_price,
+                'prev_close': prev_close,
+                'prev_open': prev_open,
+                'atr_value': atr_value,
+                'precision': precision,
+                'tp_multiplier': tp_multiplier,
+                'position_side': 'BOTH',
+                'margin_type': 'isolated',
+                'price_info': price_info
+            }
+            
+        except Exception as e:
+            logger.error(f"解析信號數據時出錯: {str(e)}")
+            raise
     
-    def _calculate_entry_price_with_discount(self, open_price, close_price, prev_close, prev_open, opposite, precision, signal_type):
-        """
-        計算開倉價格，包含reversal_buy特殊處理
-        
-        Returns:
-            tuple: (計算後的價格, 價格信息字典)
-        """
+    def _calculate_entry_price(self, signal_type, opposite, open_price, close_price, prev_close, prev_open, precision):
+        """計算開倉價格"""
         price_info = {
             'is_discount_strategy': False,
             'strategy_description': '',
@@ -297,161 +313,171 @@ class SignalProcessor:
             'discount_amount': 0
         }
         
-        # 🔥 reversal_buy + opposite=1 的特殊處理
-        if signal_type == 'reversal_buy' and opposite == 1:
-            if prev_close:
-                base_price = float(prev_close)
-                discount_percentage = 1.0  # 1%折扣
-                discount_amount = base_price * (discount_percentage / 100)
-                final_price = base_price - discount_amount
+        try:
+            if opposite == 0:
+                # 使用當前收盤價
+                calculated_price = close_price
+                price_info['strategy_description'] = '當前收盤價'
+                price_info['base_price'] = close_price
                 
-                # 記錄價格信息
-                price_info.update({
-                    'is_discount_strategy': True,
-                    'strategy_description': 'reversal_buy低1%策略',
-                    'base_price': base_price,
-                    'discount_percentage': discount_percentage,
-                    'discount_amount': discount_amount
-                })
+            elif opposite == 1:
+                # reversal_buy專用：前根收盤價-1%
+                if signal_type == 'reversal_buy':
+                    base_price = prev_close
+                    discount_percentage = 1.0
+                    discount_amount = base_price * (discount_percentage / 100)
+                    calculated_price = base_price - discount_amount
+                    
+                    # 記錄價格信息
+                    price_info.update({
+                        'is_discount_strategy': True,
+                        'strategy_description': 'reversal_buy低1%策略',
+                        'base_price': base_price,
+                        'discount_percentage': discount_percentage,
+                        'discount_amount': discount_amount
+                    })
+                else:
+                    # 其他策略使用前根收盤價
+                    calculated_price = prev_close
+                    price_info['strategy_description'] = '前根收盤價'
+                    price_info['base_price'] = prev_close
+                    
+            elif opposite == 2:
+                # 使用前根開盤價
+                calculated_price = prev_open
+                price_info['strategy_description'] = '前根開盤價'
+                price_info['base_price'] = prev_open
                 
-                logger.info(f"🎯 啟用reversal_buy低1%策略:")
-                logger.info(f"   前根收盤價: {base_price}")
-                logger.info(f"   折扣後價格: {final_price}")
-                logger.info(f"   節省成本: {discount_amount:.6f}")
-                
-                return calculate_price_with_precision(final_price, precision), price_info
-        
-        # 原有的價格計算邏輯
-        if opposite == 2:
-            # 使用前根開盤價
-            if prev_open:
-                price = float(prev_open)
-                price_info['strategy_description'] = '使用前根開盤價'
             else:
-                price = open_price
-                price_info['strategy_description'] = '前根開盤價不可用，使用當前開盤價'
-        elif opposite == 1:
-            # 使用前根收盤價（非reversal_buy情況）
-            if prev_close:
-                price = float(prev_close)
-                price_info['strategy_description'] = '使用前根收盤價'
-            else:
-                price = close_price
-                price_info['strategy_description'] = '前根收盤價不可用，使用當前收盤價'
-        else:
-            # opposite == 0，使用當前收盤價
-            price = close_price
-            price_info['strategy_description'] = '使用當前收盤價'
-        
-        price_info['base_price'] = price
-        return calculate_price_with_precision(price, precision), price_info
+                # 默認使用當前收盤價
+                calculated_price = close_price
+                price_info['strategy_description'] = '默認當前收盤價'
+                price_info['base_price'] = close_price
+            
+            # 四捨五入到指定精度
+            final_price = calculate_price_with_precision(calculated_price, precision)
+            price_info['price'] = final_price
+            
+            return price_info
+            
+        except Exception as e:
+            logger.error(f"計算開倉價格時出錯: {str(e)}")
+            # 返回安全的默認價格
+            price_info['price'] = calculate_price_with_precision(close_price, precision)
+            price_info['strategy_description'] = '錯誤時默認價格'
+            return price_info
     
     def _check_position_conflict(self, parsed_signal):
-        """檢查倉位衝突"""
-        symbol = parsed_signal['symbol']
-        side = parsed_signal['side']
-        
-        # 獲取當前持倉
-        current_position = position_manager.get_position(symbol)
-        
-        if current_position and float(current_position.get('positionAmt', 0)) != 0:
-            position_amt = float(current_position['positionAmt'])
-            current_side = 'LONG' if position_amt > 0 else 'SHORT'
-            is_same_direction = (current_side == 'LONG' and side == 'BUY') or (current_side == 'SHORT' and side == 'SELL')
-
-            new_side = 'LONG' if side == 'BUY' else 'SHORT'
-            logger.info(f"檢測到 {symbol} 現有{current_side}倉位, 新信號方向: {new_side}")
+        """檢查現有倉位衝突"""
+        try:
+            symbol = parsed_signal['symbol']
+            side = parsed_signal['side']
             
-            if is_same_direction:
-                # 方向一致：加倉邏輯
-                logger.info(f"方向一致，執行加倉操作")
-                
-                # 取消現有的止盈單和止損單，準備加倉後重新設置
-                order_manager.cancel_existing_tp_orders_for_symbol(symbol)
-                order_manager.cancel_existing_sl_orders_for_symbol(symbol)
-                
-                logger.info(f"準備加倉 {symbol} {new_side} 倉位")
-                return {'action': 'add_position', 'is_add_position': True}
-            else:
-                # 方向不一致：完全忽略
-                logger.info(f"方向不一致，完全忽略新信號，保持現有倉位不變")
+            # 檢查是否已有持倉
+            current_position = position_manager.get_position_info(symbol)
+            
+            if current_position is None:
+                # 沒有持倉，可以正常開倉
                 return {
-                    "status": "ignored",
-                    "message": f"方向不一致，已忽略信號",
-                    "symbol": symbol,
-                    "current_side": current_side,
-                    "signal_side": new_side,
-                    "action": "ignore"
+                    'action': 'execute',
+                    'is_add_position': False,
+                    'reason': f'{symbol} 無現有持倉，準備新開倉'
                 }
-        else:
-            logger.info(f"{symbol} 無現有持倉，準備新開倉")
-            return {'action': 'new_position', 'is_add_position': False}
+            
+            current_side = current_position.get('side')
+            new_direction = 'LONG' if side == 'BUY' else 'SHORT'
+            
+            if current_side == new_direction:
+                # 同方向，執行加倉
+                logger.info(f"{symbol} 檢測到同方向持倉，執行加倉操作")
+                return {
+                    'action': 'execute',
+                    'is_add_position': True,
+                    'reason': f'{symbol} 同方向持倉，執行加倉'
+                }
+            else:
+                # 反方向，忽略信號
+                logger.warning(f"{symbol} 檢測到反方向持倉，忽略信號")
+                return {
+                    'action': 'ignore',
+                    'message': f'{symbol} 存在反方向持倉 ({current_side})，忽略 {new_direction} 信號',
+                    'status': 'ignored',
+                    'current_position': current_side,
+                    'signal_direction': new_direction
+                }
+                
+        except Exception as e:
+            logger.error(f"檢查倉位衝突時出錯: {str(e)}")
+            # 發生錯誤時，為安全起見，假設無持倉
+            return {
+                'action': 'execute',
+                'is_add_position': False,
+                'reason': f'檢查持倉時出錯，假設無持倉執行'
+            }
     
     def _setup_trading_parameters(self, parsed_signal):
         """設置交易參數"""
-        symbol = parsed_signal['symbol']
-        margin_type = parsed_signal['margin_type']
-        
-        # 設置槓桿和保證金模式
-        binance_client.set_leverage(symbol, DEFAULT_LEVERAGE)
-        binance_client.set_margin_type(symbol, margin_type)
+        try:
+            symbol = parsed_signal['symbol']
+            
+            # 設置槓桿
+            leverage_result = binance_client.set_leverage(symbol, DEFAULT_LEVERAGE)
+            if leverage_result:
+                logger.info(f"設置槓桿響應: {leverage_result}")
+            
+            # 設置保證金模式
+            margin_result = binance_client.set_margin_type(symbol, parsed_signal['margin_type'])
+            if margin_result:
+                logger.info(f"設置保證金模式響應: {margin_result}")
+                
+        except Exception as e:
+            logger.error(f"設置交易參數時出錯: {str(e)}")
     
     def _calculate_tp_parameters(self, parsed_signal):
         """計算止盈參數"""
-        symbol = parsed_signal['symbol']
-        price = parsed_signal['price']
-        atr_value = parsed_signal['atr_value']
-        tp_multiplier = parsed_signal['tp_multiplier']
-        
-        tp_price_offset = None
-        
-        if atr_value and str(atr_value).replace('.', '').replace('-', '').isdigit():
-            atr_value = float(atr_value)
+        try:
+            atr_value = parsed_signal['atr_value']
+            tp_multiplier = parsed_signal['tp_multiplier']
+            
+            # 使用ATR計算止盈偏移量
             tp_price_offset = atr_value * tp_multiplier
+            
             logger.info(f"使用ATR止盈: ATR={atr_value}, 倍數={tp_multiplier}, 偏移={tp_price_offset}")
-        else:
-            logger.info(f"未提供有效ATR值({atr_value})，將使用百分比止盈")
-        
-        return {
-            'tp_price_offset': tp_price_offset,
-            'tp_multiplier': tp_multiplier
-        }
+            
+            return {
+                'tp_price_offset': tp_price_offset,
+                'tp_multiplier': tp_multiplier
+            }
+            
+        except Exception as e:
+            logger.error(f"計算止盈參數時出錯: {str(e)}")
+            # 返回默認值
+            return {
+                'tp_price_offset': float(parsed_signal['price']) * TP_PERCENTAGE,
+                'tp_multiplier': 1.0
+            }
     
-    def _save_webhook_data(self, parsed_signal, tp_params, shadow_result=None):
-        """保存webhook數據，包含影子決策結果"""
-        webhook_data = {
-            'symbol': parsed_signal['symbol'],
-            'side': parsed_signal['side'],
-            'signal_type': parsed_signal['signal_type'],
-            'quantity': parsed_signal['quantity'],
-            'price': parsed_signal['price'],
-            'open_price': parsed_signal['open_price'],
-            'close_price': parsed_signal['close_price'],
-            'prev_close': parsed_signal['prev_close'],
-            'prev_open': parsed_signal['prev_open'],
-            'order_type': parsed_signal['order_type'],
-            'position_side': parsed_signal['position_side'],
-            'strategy_name': parsed_signal['strategy_name'],
-            'atr_value': parsed_signal['atr_value'],
-            'margin_type': parsed_signal['margin_type'],
-            'opposite': parsed_signal['opposite'],
-            'precision': parsed_signal['precision'],
-            'tp_multiplier': parsed_signal['tp_multiplier'],
-            'tp_price_offset': tp_params['tp_price_offset'],
-            'price_info': parsed_signal['price_info'],
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        # 🔥 新增：包含影子決策結果
-        if shadow_result:
-            webhook_data['shadow_decision'] = shadow_result
-        
-        self.last_webhook_data = webhook_data
-        logger.info("Webhook數據已保存（包含影子決策）")
+    def _save_webhook_data(self, parsed_signal, tp_params, shadow_result):
+        """保存webhook數據"""
+        try:
+            self.last_webhook_data = {
+                'signal': parsed_signal,
+                'tp_params': tp_params,
+                'shadow_decision': shadow_result,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            logger.info("Webhook數據已保存（包含影子決策）")
+            
+        except Exception as e:
+            logger.error(f"保存webhook數據時出錯: {str(e)}")
     
     def _create_and_execute_order(self, parsed_signal, tp_params, position_decision, signal_id, signal_start_time):
-        """創建並執行訂單"""
+        """創建並執行訂單 - 修復方法錯誤"""
         try:
+            # 確保交易方向是大寫
+            parsed_signal['side'] = parsed_signal['side'].upper()
+
             # 生成訂單ID
             client_order_id = self._generate_order_id(parsed_signal)
             
@@ -508,29 +534,24 @@ class SignalProcessor:
                 'strategy_name': parsed_signal['strategy_name'],
                 'client_order_id': client_order_id,
                 'signal_id': signal_id,
-                'timeout_minutes': timeout_minutes
+                'timeout_minutes': timeout_minutes,
+                'position_side': parsed_signal['position_side'],
+                'is_add_position': position_decision['is_add_position'],
+                'expiry_time': expiry_time
             }
             
-            # 創建訂單
-            order_result = order_manager.create_futures_order_with_tp_sl(
+            # 保存訂單信息到order_manager
+            order_manager.save_order_info(client_order_id, order_data)
+            
+            # 🔥 修復：使用正確的方法名稱和參數
+            order_result = order_manager.create_order(
                 symbol=parsed_signal['symbol'],
                 side=parsed_signal['side'],
+                order_type=parsed_signal['order_type'],
                 quantity=parsed_signal['quantity'],
                 price=parsed_signal['price'],
-                order_type=parsed_signal['order_type'],
                 client_order_id=client_order_id,
-                atr_value=parsed_signal['atr_value'],
-                tp_price_offset=tp_params['tp_price_offset'],
-                tp_multiplier=tp_params['tp_multiplier'],
-                signal_id=signal_id,
-                leverage=DEFAULT_LEVERAGE,
-                margin_type=parsed_signal['margin_type'],
-                opposite=parsed_signal['opposite'],
-                precision=parsed_signal['precision'],
-                position_side=parsed_signal['position_side'],
-                strategy_name=parsed_signal['strategy_name'],
-                is_add_position=position_decision['is_add_position'],
-                expiry_time=expiry_time
+                position_side=parsed_signal['position_side']
             )
             
             # 計算執行延遲
@@ -544,7 +565,7 @@ class SignalProcessor:
                     "side": parsed_signal['side'],
                     "quantity": parsed_signal['quantity'],
                     "price": parsed_signal['price'],
-                    "order_id": order_result['order_id'],
+                    "order_id": order_result.get('order_id', 'UNKNOWN'),
                     "client_order_id": client_order_id,
                     "atr_value": parsed_signal['atr_value'],
                     "tp_price_offset": tp_params['tp_price_offset'],
@@ -559,9 +580,10 @@ class SignalProcessor:
                 }
             else:
                 # 下單失敗，更新狀態
-                order_manager.orders[client_order_id]['status'] = 'FAILED'
+                if client_order_id in order_manager.orders:
+                    order_manager.orders[client_order_id]['status'] = 'FAILED'
                 return {"status": "error", "message": "下單失敗", "signal_id": signal_id}
-                
+        
         except Exception as e:
             logger.error(f"創建訂單時出錯: {str(e)}")
             logger.error(traceback.format_exc())

@@ -607,11 +607,7 @@ class OrderManager:
             }
             
             # 寫入資料庫
-<<<<<<< HEAD
             from database import trading_data_manager
-=======
-            from trading_data_manager import trading_data_manager
->>>>>>> 36e2ad4b1d6e4e77ba5ccb0190b9c66b01d574f8
             success = trading_data_manager.record_trading_result_by_client_id(
                 order_info.get('client_order_id'), result_data
             )
@@ -662,11 +658,7 @@ class OrderManager:
             }
             
             # 寫入資料庫
-<<<<<<< HEAD
             from database import trading_data_manager
-=======
-            from trading_data_manager import trading_data_manager
->>>>>>> 36e2ad4b1d6e4e77ba5ccb0190b9c66b01d574f8
             success = trading_data_manager.record_trading_result_by_client_id(
                 order_info.get('client_order_id'), result_data
             )

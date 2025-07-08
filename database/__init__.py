@@ -21,7 +21,8 @@ DB_PATH = get_database_path()
 # trading_data_manager 已可用
 
 # ML數據管理器
-ml_data_manager = create_ml_data_manager(DB_PATH)
+from .ml_data_manager import MLDataManager
+ml_data_manager = MLDataManager(DB_PATH)
 
 # 統計分析管理器  
 analytics_manager = create_analytics_manager(DB_PATH)

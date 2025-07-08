@@ -292,11 +292,7 @@ class WebSocketManager:
             executed_qty: 成交數量（可選）
         """
         try:
-<<<<<<< HEAD
             from database import trading_data_manager
-=======
-            from trading_data_manager import trading_data_manager
->>>>>>> 36e2ad4b1d6e4e77ba5ccb0190b9c66b01d574f8
             
             with sqlite3.connect(trading_data_manager.db_path) as conn:
                 cursor = conn.cursor()
