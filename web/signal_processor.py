@@ -141,6 +141,14 @@ class SignalProcessor:
         try:
             logger.info(f"開始計算ML特徵 - session_id: {session_id}, signal_id: {signal_id}")
             
+            # 🔥 新增：檢查ML管理器是否可用
+            if ml_data_manager is None:
+                logger.warning("⚠️ ML數據管理器未初始化，嘗試重新初始化...")
+                from database import retry_ml_initialization
+                if not retry_ml_initialization():
+                    logger.error("❌ ML重新初始化失敗，使用默認特徵")
+                    return self._get_default_features()
+
             # 計算36個特徵
             features = ml_data_manager.calculate_basic_features(signal_data)
             
@@ -653,6 +661,46 @@ class SignalProcessor:
         except Exception as e:
             logger.error(f"獲取影子統計時出錯: {str(e)}")
             return {"error": str(e)}
+    def _get_default_features(self):
+        """獲取默認特徵值 - 當ML系統失敗時使用"""
+        return {
+            'strategy_win_rate_recent': 0.5,
+            'strategy_win_rate_overall': 0.5,
+            'strategy_market_fitness': 0.5,
+            'volatility_match_score': 0.5,
+            'time_slot_match_score': 0.5,
+            'symbol_match_score': 0.5,
+            'price_momentum_strength': 0.5,
+            'atr_relative_position': 0.5,
+            'risk_reward_ratio': 2.5,
+            'execution_difficulty': 0.5,
+            'consecutive_win_streak': 0,
+            'consecutive_loss_streak': 0,
+            'system_overall_performance': 0.5,
+            'signal_confidence_score': 0.5,
+            'market_condition_fitness': 0.5,
+            'price_deviation_percent': 0.0,
+            'price_deviation_abs': 0.0,
+            'atr_normalized_deviation': 0.0,
+            'candle_direction': 0,
+            'candle_body_size': 0.0,
+            'candle_wick_ratio': 0.5,
+            'price_position_in_range': 0.5,
+            'upward_adjustment_space': 0.02,
+            'downward_adjustment_space': 0.02,
+            'historical_best_adjustment': 0.0,
+            'price_reachability_score': 0.7,
+            'entry_price_quality_score': 0.6,
+            'hour_of_day': 12,
+            'trading_session': 1,
+            'weekend_factor': 0,
+            'symbol_category': 4,
+            'current_positions': 0,
+            'margin_ratio': 0.5,
+            'atr_normalized': 0.01,
+            'volatility_regime': 1,
+            'market_trend_strength': 0.5
+        }
 
 # 創建全局信號處理器實例
 signal_processor = SignalProcessor()

@@ -21,119 +21,168 @@ class MLDataManager:
         logger.info(f"ML數據管理器已初始化，資料庫路徑: {self.db_path}")
     
     def _init_ml_tables(self):
-        """初始化ML相關表格 - 強制重建確保完整"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                # 🔥 強制重建表格，確保包含所有36個特徵欄位
-                logger.info("正在重建ML表格，確保36個特徵欄位完整...")
-                
-                cursor.execute('DROP TABLE IF EXISTS ml_features_v2')
-                cursor.execute('DROP TABLE IF EXISTS ml_signal_quality') 
-                cursor.execute('DROP TABLE IF EXISTS ml_price_optimization')
-                
-                # 1. ML特徵表 (完整36個特徵)
-                cursor.execute('''
-                    CREATE TABLE ml_features_v2 (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT NOT NULL,
-                        signal_id INTEGER,
-                        
-                        -- 信號品質核心特徵 (15個)
-                        strategy_win_rate_recent REAL DEFAULT 0.0,
-                        strategy_win_rate_overall REAL DEFAULT 0.0,
-                        strategy_market_fitness REAL DEFAULT 0.0,
-                        volatility_match_score REAL DEFAULT 0.0,
-                        time_slot_match_score REAL DEFAULT 0.0,
-                        symbol_match_score REAL DEFAULT 0.0,
-                        price_momentum_strength REAL DEFAULT 0.0,
-                        atr_relative_position REAL DEFAULT 0.0,
-                        risk_reward_ratio REAL DEFAULT 0.0,
-                        execution_difficulty REAL DEFAULT 0.0,
-                        consecutive_win_streak INTEGER DEFAULT 0,
-                        consecutive_loss_streak INTEGER DEFAULT 0,
-                        system_overall_performance REAL DEFAULT 0.0,
-                        signal_confidence_score REAL DEFAULT 0.0,
-                        market_condition_fitness REAL DEFAULT 0.0,
-                        
-                        -- 價格關係特徵 (12個)
-                        price_deviation_percent REAL DEFAULT 0.0,
-                        price_deviation_abs REAL DEFAULT 0.0,
-                        atr_normalized_deviation REAL DEFAULT 0.0,
-                        candle_direction INTEGER DEFAULT 0,
-                        candle_body_size REAL DEFAULT 0.0,
-                        candle_wick_ratio REAL DEFAULT 0.0,
-                        price_position_in_range REAL DEFAULT 0.0,
-                        upward_adjustment_space REAL DEFAULT 0.0,
-                        downward_adjustment_space REAL DEFAULT 0.0,
-                        historical_best_adjustment REAL DEFAULT 0.0,
-                        price_reachability_score REAL DEFAULT 0.0,
-                        entry_price_quality_score REAL DEFAULT 0.0,
-                        
-                        -- 市場環境特徵 (9個)
-                        hour_of_day INTEGER DEFAULT 0,
-                        trading_session INTEGER DEFAULT 0,
-                        weekend_factor INTEGER DEFAULT 0,
-                        symbol_category INTEGER DEFAULT 0,
-                        current_positions INTEGER DEFAULT 0,
-                        margin_ratio REAL DEFAULT 0.0,
-                        atr_normalized REAL DEFAULT 0.0,
-                        volatility_regime INTEGER DEFAULT 0,
-                        market_trend_strength REAL DEFAULT 0.0,
-                        
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (signal_id) REFERENCES signals_received (id)
-                    )
-                ''')
-                
-                # 2. 信號品質評估表
-                cursor.execute('''
-                    CREATE TABLE ml_signal_quality (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT NOT NULL,
-                        signal_id INTEGER,
-                        decision_method TEXT DEFAULT 'RULE_BASED',
-                        recommendation TEXT,
-                        confidence_score REAL,
-                        execution_probability REAL,
-                        reason TEXT,
-                        reasoning_details TEXT,
-                        model_version TEXT DEFAULT 'v1.0',
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (signal_id) REFERENCES signals_received (id)
-                    )
-                ''')
-                
-                # 3. 價格優化表
-                cursor.execute('''
-                    CREATE TABLE ml_price_optimization (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT NOT NULL,
-                        signal_id INTEGER,
-                        original_price REAL,
-                        optimized_price REAL,
-                        price_adjustment_percent REAL,
-                        optimization_reason TEXT,
-                        expected_improvement REAL,
-                        confidence_level REAL,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (signal_id) REFERENCES signals_received (id)
-                    )
-                ''')
-                
-                # 創建索引
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_ml_features_signal_id ON ml_features_v2(signal_id)')
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_ml_features_session_id ON ml_features_v2(session_id)')
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_ml_quality_signal_id ON ml_signal_quality(signal_id)')
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_ml_price_signal_id ON ml_price_optimization(signal_id)')
-                
-                conn.commit()
-                logger.info("ML資料庫表格初始化完成 - 36特徵架構（完整重建版本）")
-                
-        except Exception as e:
-            logger.error(f"初始化ML表格時出錯: {str(e)}")
-            raise
+        """初始化ML相關表格 - 防SQLite鎖定的完美版本"""
+        max_retries = 3
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                    cursor = conn.cursor()
+                    
+                    # 🔥 第一步：確保最佳資料庫設定
+                    cursor.execute('PRAGMA journal_mode = WAL')
+                    cursor.execute('PRAGMA synchronous = NORMAL')
+                    cursor.execute('PRAGMA cache_size = 10000')
+                    cursor.execute('PRAGMA temp_store = MEMORY')
+                    cursor.execute('PRAGMA busy_timeout = 30000')  # 30秒超時
+                    
+                    # 🔥 第二步：檢查現有表格
+                    cursor.execute("""
+                        SELECT name FROM sqlite_master 
+                        WHERE type='table' AND name IN ('ml_features_v2', 'ml_signal_quality', 'ml_price_optimization')
+                    """)
+                    existing_tables = [row[0] for row in cursor.fetchall()]
+                    
+                    if len(existing_tables) == 3:
+                        logger.info("✅ ML表格已完整存在，跳過創建")
+                        # 驗證表格結構
+                        cursor.execute("PRAGMA table_info(ml_features_v2)")
+                        columns = cursor.fetchall()
+                        if len(columns) >= 38:  # 36特徵 + id + session_id + signal_id + created_at
+                            logger.info("✅ ML表格結構驗證通過")
+                            return
+                        else:
+                            logger.warning(f"⚠️ ML表格結構不完整，重新創建")
+                    
+                    # 🔥 第三步：創建缺失的表格
+                    logger.info(f"正在創建ML表格... (現有: {len(existing_tables)}/3)")
+                    
+                    # 如果表格不完整，先清理
+                    if existing_tables:
+                        for table in existing_tables:
+                            cursor.execute(f'DROP TABLE IF EXISTS {table}')
+                            logger.info(f"已清理舊表格: {table}")
+                    
+                    # 創建ML特徵表 (36個特徵)
+                    cursor.execute('''
+                        CREATE TABLE ml_features_v2 (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            signal_id INTEGER,
+                            
+                            -- 信號品質核心特徵 (15個)
+                            strategy_win_rate_recent REAL DEFAULT 0.0,
+                            strategy_win_rate_overall REAL DEFAULT 0.0,
+                            strategy_market_fitness REAL DEFAULT 0.0,
+                            volatility_match_score REAL DEFAULT 0.0,
+                            time_slot_match_score REAL DEFAULT 0.0,
+                            symbol_match_score REAL DEFAULT 0.0,
+                            price_momentum_strength REAL DEFAULT 0.0,
+                            atr_relative_position REAL DEFAULT 0.0,
+                            risk_reward_ratio REAL DEFAULT 0.0,
+                            execution_difficulty REAL DEFAULT 0.0,
+                            consecutive_win_streak INTEGER DEFAULT 0,
+                            consecutive_loss_streak INTEGER DEFAULT 0,
+                            system_overall_performance REAL DEFAULT 0.0,
+                            signal_confidence_score REAL DEFAULT 0.0,
+                            market_condition_fitness REAL DEFAULT 0.0,
+                            
+                            -- 價格關係特徵 (12個)
+                            price_deviation_percent REAL DEFAULT 0.0,
+                            price_deviation_abs REAL DEFAULT 0.0,
+                            atr_normalized_deviation REAL DEFAULT 0.0,
+                            candle_direction INTEGER DEFAULT 0,
+                            candle_body_size REAL DEFAULT 0.0,
+                            candle_wick_ratio REAL DEFAULT 0.0,
+                            price_position_in_range REAL DEFAULT 0.0,
+                            upward_adjustment_space REAL DEFAULT 0.0,
+                            downward_adjustment_space REAL DEFAULT 0.0,
+                            historical_best_adjustment REAL DEFAULT 0.0,
+                            price_reachability_score REAL DEFAULT 0.0,
+                            entry_price_quality_score REAL DEFAULT 0.0,
+                            
+                            -- 市場環境特徵 (9個)
+                            hour_of_day INTEGER DEFAULT 0,
+                            trading_session INTEGER DEFAULT 0,
+                            weekend_factor INTEGER DEFAULT 0,
+                            symbol_category INTEGER DEFAULT 0,
+                            current_positions INTEGER DEFAULT 0,
+                            margin_ratio REAL DEFAULT 0.0,
+                            atr_normalized REAL DEFAULT 0.0,
+                            volatility_regime INTEGER DEFAULT 0,
+                            market_trend_strength REAL DEFAULT 0.0,
+                            
+                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (signal_id) REFERENCES signals_received (id)
+                        )
+                    ''')
+                    
+                    # 創建信號品質評估表
+                    cursor.execute('''
+                        CREATE TABLE ml_signal_quality (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            signal_id INTEGER,
+                            decision_method TEXT DEFAULT 'RULE_BASED',
+                            recommendation TEXT,
+                            confidence_score REAL,
+                            execution_probability REAL,
+                            reason TEXT,
+                            reasoning_details TEXT,
+                            model_version TEXT DEFAULT 'v1.0',
+                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (signal_id) REFERENCES signals_received (id)
+                        )
+                    ''')
+                    
+                    # 創建價格優化表
+                    cursor.execute('''
+                        CREATE TABLE ml_price_optimization (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            signal_id INTEGER,
+                            original_price REAL,
+                            optimized_price REAL,
+                            price_adjustment_percent REAL,
+                            optimization_reason TEXT,
+                            expected_improvement REAL,
+                            confidence_level REAL,
+                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (signal_id) REFERENCES signals_received (id)
+                        )
+                    ''')
+                    
+                    # 創建索引
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ml_features_signal_id ON ml_features_v2(signal_id)')
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ml_features_session_id ON ml_features_v2(session_id)')
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ml_quality_signal_id ON ml_signal_quality(signal_id)')
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ml_price_signal_id ON ml_price_optimization(signal_id)')
+                    
+                    conn.commit()
+                    logger.info("✅ ML資料庫表格初始化完成 (防鎖定增強版)")
+                    return
+                    
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                    logger.warning(f"⚠️ 資料庫被鎖定，第{attempt + 1}次重試 (等待{retry_delay}秒)")
+                    time.sleep(retry_delay)
+                    retry_delay *= 1.5  # 指數退避
+                    continue
+                else:
+                    logger.error(f"❌ 初始化ML表格失敗: {str(e)}")
+                    raise
+            except Exception as e:
+                logger.error(f"❌ 初始化ML表格時出錯: {str(e)}")
+                if attempt < max_retries - 1:
+                    logger.info(f"嘗試第{attempt + 2}次初始化...")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    raise
+        
+        logger.error("❌ 多次重試後仍無法初始化ML表格")
+        raise Exception("ML表格初始化失敗")
     
     def record_ml_features(self, session_id: str, signal_id: int, features: Dict[str, Any]) -> bool:
         """記錄ML特徵數據 - 36個特徵完整版本"""
@@ -528,3 +577,4 @@ class MLDataManager:
 def create_ml_data_manager(db_path: str) -> MLDataManager:
     """創建ML數據管理器實例"""
     return MLDataManager(db_path)
+

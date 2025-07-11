@@ -112,60 +112,105 @@ class BinanceClient:
         return response.status_code == 200 or "already" in response.text.lower()
     
     def get_current_positions(self):
-        """獲取當前所有持倉信息（優化版本 - 減少log輸出）"""
-        endpoint = "/fapi/v2/positionRisk"
-        headers = {"X-MBX-APIKEY": self.api_key}
-        
-        params = {
-            "timestamp": int(time.time() * 1000)
-        }
-        
-        # 簽名
-        params = self._sign_request(params)
-        
-        # 發送請求
-        try:
-            response = requests.get(f"{self.base_url}{endpoint}", headers=headers, params=params)
+            """
+            獲取當前所有持倉信息 - 修復版本
             
-            if response.status_code == 200:
-                positions = response.json()
-                # 過濾出有效持倉（持倉數量不為零）
-                active_positions = {}
-                zero_positions_count = 0
+            🔥 修復內容：
+            1. 原始數據記錄
+            2. 異常檢測
+            3. 持倉變化追蹤
+            """
+            endpoint = "/fapi/v2/positionRisk"
+            headers = {"X-MBX-APIKEY": self.api_key}
+            
+            params = {
+                "timestamp": int(time.time() * 1000)
+            }
+            
+            # 簽名
+            params = self._sign_request(params)
+            
+            try:
+                response = requests.get(f"{self.base_url}{endpoint}", headers=headers, params=params)
                 
-                for position in positions:
-                    symbol = position.get('symbol')
-                    position_amt = float(position.get('positionAmt', 0))
+                if response.status_code == 200:
+                    positions = response.json()
+                    active_positions = {}
+                    zero_positions_count = 0
                     
-                    if position_amt != 0:
-                        # 正值為多單，負值為空單
-                        position_side = 'LONG' if position_amt > 0 else 'SHORT'
-                        active_positions[symbol] = {
-                            'symbol': symbol,
-                            'positionAmt': position_amt,
-                            'side': position_side,
-                            'entryPrice': float(position.get('entryPrice', 0)),
-                            'markPrice': float(position.get('markPrice', 0)),
-                            'unRealizedProfit': float(position.get('unRealizedProfit', 0))
-                        }
+                    # 🔥 修復1: 記錄原始API數據（僅活躍持倉）
+                    raw_data_log = []
+                    
+                    for position in positions:
+                        symbol = position.get('symbol')
+                        position_amt = float(position.get('positionAmt', 0))
+                        
+                        if position_amt != 0:
+                            # 🔥 修復2: 記錄原始數據用於調試
+                            raw_data = {
+                                'symbol': symbol,
+                                'positionAmt': position_amt,
+                                'entryPrice': position.get('entryPrice'),
+                                'markPrice': position.get('markPrice'),
+                                'unRealizedProfit': position.get('unRealizedProfit')
+                            }
+                            raw_data_log.append(raw_data)
+                            
+                            # 處理持倉數據
+                            position_side = 'LONG' if position_amt > 0 else 'SHORT'
+                            active_positions[symbol] = {
+                                'symbol': symbol,
+                                'positionAmt': position_amt,
+                                'side': position_side,
+                                'entryPrice': float(position.get('entryPrice', 0)),
+                                'markPrice': float(position.get('markPrice', 0)),
+                                'unRealizedProfit': float(position.get('unRealizedProfit', 0))
+                            }
+                        else:
+                            zero_positions_count += 1
+                    
+                    # 🔥 修復3: 詳細日誌記錄
+                    if active_positions:
+                        logger.info(f"🔍 持倉查詢完成 - 活躍: {len(active_positions)}個, 零持倉: {zero_positions_count}個")
+                        
+                        # 🔥 修復4: 持倉變化檢測
+                        if hasattr(self, '_last_positions'):
+                            for symbol, current_pos in active_positions.items():
+                                if symbol in self._last_positions:
+                                    old_amt = self._last_positions[symbol]['positionAmt']
+                                    new_amt = current_pos['positionAmt']
+                                    
+                                    if abs(abs(old_amt) - abs(new_amt)) > 0.001:
+                                        change = abs(new_amt) - abs(old_amt)
+                                        logger.info(f"📊 {symbol} 持倉變化: {abs(old_amt)} → {abs(new_amt)} (變化: {change:+.4f})")
+                                        
+                                        # 🔥 修復5: 異常變化檢測
+                                        if abs(new_amt) > abs(old_amt) * 2:
+                                            logger.warning(f"⚠️ {symbol} 持倉異常增長！可能存在問題")
+                                else:
+                                    logger.info(f"📊 {symbol} 新增持倉: {abs(current_pos['positionAmt'])}")
+                        
+                        # 記錄當前持倉用於下次對比
+                        self._last_positions = active_positions.copy()
+                        
+                        # 顯示持倉摘要
+                        for symbol, pos in active_positions.items():
+                            logger.info(f"  {symbol}: {pos['side']} {abs(pos['positionAmt'])}, 盈虧: {pos['unRealizedProfit']:.4f}")
+                            
+                        # 🔥 修復6: 調試模式下記錄原始數據
+                        if logger.getEffectiveLevel() <= logging.DEBUG:
+                            logger.debug(f"🔍 原始API數據: {raw_data_log}")
                     else:
-                        zero_positions_count += 1
-                
-                # 優化的log輸出 - 只顯示摘要信息
-                if active_positions:
-                    logger.info(f"查詢持倉完成 - 活躍持倉: {len(active_positions)}個, 零持倉: {zero_positions_count}個")
-                    for symbol, pos in active_positions.items():
-                        logger.info(f"  {symbol}: {pos['side']} {abs(pos['positionAmt'])}, 未實現盈虧: {pos['unRealizedProfit']:.4f}")
+                        logger.info(f"🔍 持倉查詢完成 - 無活躍持倉")
+                        
+                    return active_positions
                 else:
-                    logger.info(f"查詢持倉完成 - 無活躍持倉, 總計查詢{zero_positions_count}個交易對")
-                    
-                return active_positions
-            else:
-                logger.error(f"查詢持倉失敗 - 狀態碼: {response.status_code}, 錯誤: {response.text[:200]}...")
+                    logger.error(f"❌ 查詢持倉失敗 - 狀態碼: {response.status_code}")
+                    logger.error(f"❌ 錯誤詳情: {response.text[:200]}...")
+                    return {}
+            except Exception as e:
+                logger.error(f"❌ 查詢持倉出錯: {str(e)}")
                 return {}
-        except Exception as e:
-            logger.error(f"查詢持倉出錯: {str(e)}")
-            return {}
     
     def place_order(self, symbol, side, order_type, quantity, price=None, stop_price=None, 
                     time_in_force=None, client_order_id=None, position_side='BOTH', good_till_date=None):
@@ -238,3 +283,4 @@ class BinanceClient:
 
 # 創建全局客戶端實例
 binance_client = BinanceClient()
+

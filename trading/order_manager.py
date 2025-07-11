@@ -213,133 +213,173 @@ class OrderManager:
             logger.error(f"處理提前WebSocket成交通知時出錯: {str(e)}")
     
     def place_tp_order(self, entry_order, is_add_position=False):
-        """
-        根據入場單信息下止盈單（修正版本：避免重複下單和加倉誤判）
-        
-        Args:
-            entry_order: 入場訂單信息
-            is_add_position: 是否為加倉操作
-        """
-        try:
-            symbol = entry_order['symbol']
-            side = entry_order['side']
-            quantity = entry_order['quantity']
-            entry_price = float(entry_order['price'])
-            position_side = entry_order.get('position_side', 'BOTH')
-            original_client_id = entry_order['client_order_id']
+            """
+            下止盈單 - 修復版本
             
-            # 🔥 新增：檢查是否已經有止盈單
-            if original_client_id in self.orders:
-                if self.orders[original_client_id].get('tp_placed'):
-                    logger.info(f"訂單 {original_client_id} 已經設置過止盈單，跳過重複設置")
-                    return
+            🔥 修復內容：
+            1. 止盈單數量合理性檢查
+            2. 實時持倉驗證
+            3. 異常數據拒絕機制
+            """
+            try:
+                # 基本參數提取
+                symbol = entry_order['symbol']
+                side = entry_order['side']
+                quantity = entry_order['quantity']
+                entry_price = float(entry_order['price'])
+                original_client_id = entry_order['client_order_id']
+                position_side = entry_order.get('position_side', 'BOTH')
+                
+                # 🔥 修復1: 緊急數量合理性檢查
+                expected_quantity = float(quantity)
+                logger.info(f"🔍 緊急檢查開始 - 預期數量: {expected_quantity}")
+                
+                # 獲取精度
+                precision = get_symbol_precision(symbol)
+                
+                # 初始數量設定
+                calculation_price = entry_price
+                actual_quantity = expected_quantity
+                
+                # 🔥 修復2: 加倉邏輯修復
+                if is_add_position:
+                    logger.info(f"🔍 處理加倉操作 - {symbol}")
                     
-                # 檢查是否有有效的止盈單ID
-                existing_tp_id = self.orders[original_client_id].get('tp_client_id')
-                if existing_tp_id:
-                    logger.info(f"訂單 {original_client_id} 已有止盈單 {existing_tp_id}，先取消再重新設置")
-                    binance_client.cancel_order(symbol, existing_tp_id)
-            
-            # 獲取交易對的價格精度
-            precision = get_symbol_precision(symbol)
-            
-            # 確定用於計算止盈的基準價格
-            calculation_price = entry_price
-            actual_quantity = quantity
-            
-            # 🔥 修正：更嚴格的加倉判斷
-            if is_add_position:
-                # 檢查是否真的有現有持倉（排除剛成交的這筆）
-                current_positions = binance_client.get_current_positions()
-                if symbol in current_positions:
-                    current_qty = abs(float(current_positions[symbol]['positionAmt']))
-                    expected_qty = float(quantity)
+                    # 🔥 修復2.1: 實時持倉驗證（多次查詢）
+                    current_positions_1 = binance_client.get_current_positions()
+                    time.sleep(0.3)  # 等待300ms
+                    current_positions_2 = binance_client.get_current_positions()
                     
-                    # 如果持倉數量大於當前訂單數量，才是真正的加倉
-                    if current_qty > expected_qty:
-                        avg_cost, total_qty, success = position_manager.calculate_average_cost_and_quantity(
-                            symbol, entry_price, quantity)
+                    if symbol in current_positions_1 and symbol in current_positions_2:
+                        qty_1 = abs(float(current_positions_1[symbol]['positionAmt']))
+                        qty_2 = abs(float(current_positions_2[symbol]['positionAmt']))
                         
-                        if success:
-                            calculation_price = avg_cost
-                            actual_quantity = total_qty
-                            logger.info(f"確認加倉操作 - 使用平均成本 {avg_cost} 計算止盈，總持倉量: {total_qty}")
+                        logger.info(f"🔍 持倉雙重驗證:")
+                        logger.info(f"  第一次查詢: {qty_1}")
+                        logger.info(f"  第二次查詢: {qty_2}")
+                        
+                        # 🔥 修復2.2: 數據一致性檢查
+                        if abs(qty_1 - qty_2) > 0.001:
+                            logger.error(f"🚨 持倉數據不一致！使用較小值")
+                            current_qty = min(qty_1, qty_2)
                         else:
-                            logger.warning(f"加倉操作 - 平均成本計算失敗，使用新倉位價格 {entry_price}")
+                            current_qty = qty_2
+                        
+                        # 🔥 修復2.3: 異常檢測
+                        if current_qty > expected_quantity * 3:
+                            logger.error(f"🚨 異常持倉檢測！")
+                            logger.error(f"當前持倉: {current_qty}")
+                            logger.error(f"預期數量: {expected_quantity}")
+                            logger.error(f"比例: {current_qty / expected_quantity:.2f}倍")
+                            
+                            # 拒絕處理異常數據
+                            logger.error(f"❌ 拒絕處理異常持倉數據，使用保守數量")
+                            current_qty = expected_quantity * 2  # 保守估算
+                        
+                        # 加倉計算
+                        if current_qty > expected_quantity:
+                            avg_cost, total_qty, success = position_manager.calculate_average_cost_and_quantity(
+                                symbol, entry_price, quantity)
+                            
+                            if success:
+                                calculation_price = avg_cost
+                                actual_quantity = total_qty
+                                
+                                # 🔥 修復2.4: 最終數量檢查
+                                if actual_quantity > expected_quantity * 4:
+                                    logger.error(f"🚨 計算出的止盈數量異常: {actual_quantity}")
+                                    logger.error(f"⚠️ 強制限制為安全數量: {expected_quantity * 2}")
+                                    actual_quantity = expected_quantity * 2
+                                
+                                logger.info(f"✅ 加倉確認 - 平均成本: {avg_cost}, 總量: {actual_quantity}")
+                            else:
+                                logger.warning(f"⚠️ 平均成本計算失敗，回退到新開倉模式")
+                                is_add_position = False
+                        else:
+                            logger.info(f"💡 持倉數量不符合加倉條件，判定為新開倉")
                             is_add_position = False
                     else:
-                        logger.info(f"持倉數量 {current_qty} 等於訂單數量 {expected_qty}，判斷為新開倉，不是加倉")
+                        logger.warning(f"⚠️ 未找到持倉記錄，判定為新開倉")
                         is_add_position = False
+                
+                if not is_add_position:
+                    logger.info(f"新開倉操作 - 使用入場價格 {entry_price} 計算止盈")
+                
+                # 🔥 修復3: 最終安全檢查
+                logger.info(f"🔍 最終安全檢查:")
+                logger.info(f"  止盈數量: {actual_quantity}")
+                logger.info(f"  預期數量: {expected_quantity}")
+                logger.info(f"  數量倍數: {actual_quantity / expected_quantity:.2f}")
+                
+                # 超出合理範圍時拒絕
+                if actual_quantity > expected_quantity * 3.5:
+                    logger.error(f"🚨 止盈數量超出安全範圍，強制修正")
+                    actual_quantity = expected_quantity * 2  # 保守設置
+                    logger.warning(f"⚠️ 修正後數量: {actual_quantity}")
+                
+                # 計算止盈價格偏移量
+                tp_price_offset = self._calculate_tp_offset(entry_order, calculation_price)
+                
+                # 檢查最小獲利保護
+                min_tp_offset = calculation_price * MIN_TP_PROFIT_PERCENTAGE
+                if tp_price_offset < min_tp_offset:
+                    logger.info(f"止盈偏移量 {tp_price_offset} 小於最小獲利要求 {min_tp_offset} (0.5%)，調整為最小值")
+                    tp_price_offset = min_tp_offset
                 else:
-                    logger.info(f"查詢不到 {symbol} 的現有持倉，判斷為新開倉")
-                    is_add_position = False
-            
-            if not is_add_position:
-                logger.info(f"新開倉操作 - 使用入場價格 {entry_price} 計算止盈")
-            
-            # 計算止盈價格偏移量
-            tp_price_offset = self._calculate_tp_offset(entry_order, calculation_price)
-            
-            # 檢查最小獲利保護
-            min_tp_offset = calculation_price * MIN_TP_PROFIT_PERCENTAGE
-            if tp_price_offset < min_tp_offset:
-                logger.info(f"止盈偏移量 {tp_price_offset} 小於最小獲利要求 {min_tp_offset} (0.5%)，調整為最小值")
-                tp_price_offset = min_tp_offset
-            else:
-                logger.info(f"止盈偏移量 {tp_price_offset} 滿足最小獲利要求 {min_tp_offset} (0.5%)")
-            
-            # 計算止盈價格
-            if side == 'BUY':
-                tp_price = round(calculation_price + tp_price_offset, precision)
-                tp_side = 'SELL'
-            else:  # SELL
-                tp_price = round(calculation_price - tp_price_offset, precision)
-                tp_side = 'BUY'
-            
-            logger.info(f"訂單 {original_client_id} 止盈設置:")
-            logger.info(f"  計算基準價: {calculation_price} ({'平均成本' if is_add_position else '入場價'})")
-            logger.info(f"  偏移量: +/-{tp_price_offset}")
-            logger.info(f"  止盈價: {tp_price}")
-            logger.info(f"  總持倉量: {actual_quantity}")
-            logger.info(f"  精度: {precision}")
-            
-            # 生成止盈訂單ID（添加時間戳避免重複）
-            tp_client_id = self._generate_tp_order_id(original_client_id)
-            
-            # 下止盈單 (限價單)
-            tp_order_result = binance_client.place_order(
-                symbol=symbol,
-                side=tp_side,
-                order_type='LIMIT',
-                quantity=str(actual_quantity),
-                price=tp_price,
-                time_in_force='GTC',
-                client_order_id=tp_client_id,
-                position_side=position_side
-            )
-            
-            # 更新訂單狀態
-            if original_client_id in self.orders:
-                self.orders[original_client_id]['tp_placed'] = (tp_order_result is not None)
+                    logger.info(f"止盈偏移量 {tp_price_offset} 滿足最小獲利要求 {min_tp_offset} (0.5%)")
                 
-                if tp_order_result is not None:
-                    self.orders[original_client_id]['tp_client_id'] = tp_client_id
-                    self.orders[original_client_id]['tp_price'] = tp_price
-                    self.orders[original_client_id]['calculation_price'] = calculation_price
-                    self.orders[original_client_id]['final_is_add_position'] = is_add_position
-                    self.orders[original_client_id]['total_quantity'] = actual_quantity
+                # 計算止盈價格
+                if side == 'BUY':
+                    tp_price = round(calculation_price + tp_price_offset, precision)
+                    tp_side = 'SELL'
+                else:  # SELL
+                    tp_price = round(calculation_price - tp_price_offset, precision)
+                    tp_side = 'BUY'
                 
-                self.orders[original_client_id]['actual_tp_offset'] = tp_price_offset
+                logger.info(f"訂單 {original_client_id} 止盈設置:")
+                logger.info(f"  計算基準價: {calculation_price} ({'平均成本' if is_add_position else '入場價'})")
+                logger.info(f"  偏移量: +/-{tp_price_offset}")
+                logger.info(f"  止盈價: {tp_price}")
+                logger.info(f"  總持倉量: {actual_quantity}")
+                logger.info(f"  精度: {precision}")
                 
-            logger.info(f"已為訂單 {original_client_id} 下達止盈單 - 止盈價: {tp_price}, 數量: {actual_quantity}")
-            
-            # 如果啟用止損功能，同時下止損單
-            if ENABLE_STOP_LOSS:
-                self.place_sl_order(entry_order, calculation_price, actual_quantity, is_add_position)
-            
-        except Exception as e:
-            logger.error(f"下止盈單時出錯: {str(e)}")
-            logger.error(traceback.format_exc())
+                # 生成止盈訂單ID（添加時間戳避免重複）
+                tp_client_id = self._generate_tp_order_id(original_client_id)
+                
+                # 下止盈單 (限價單)
+                tp_order_result = binance_client.place_order(
+                    symbol=symbol,
+                    side=tp_side,
+                    order_type='LIMIT',
+                    quantity=str(actual_quantity),
+                    price=tp_price,
+                    time_in_force='GTC',
+                    client_order_id=tp_client_id,
+                    position_side=position_side
+                )
+                
+                # 更新訂單狀態
+                if original_client_id in self.orders:
+                    self.orders[original_client_id]['tp_placed'] = (tp_order_result is not None)
+                    
+                    if tp_order_result is not None:
+                        self.orders[original_client_id]['tp_client_id'] = tp_client_id
+                        self.orders[original_client_id]['tp_price'] = tp_price
+                        self.orders[original_client_id]['calculation_price'] = calculation_price
+                        self.orders[original_client_id]['final_is_add_position'] = is_add_position
+                        self.orders[original_client_id]['total_quantity'] = actual_quantity
+                    
+                    self.orders[original_client_id]['actual_tp_offset'] = tp_price_offset
+                    
+                logger.info(f"✅ 止盈單處理完成 - 止盈價: {tp_price}, 數量: {actual_quantity}")
+                
+                # 如果啟用止損功能，同時下止損單
+                if ENABLE_STOP_LOSS:
+                    self.place_sl_order(entry_order, calculation_price, actual_quantity, is_add_position)
+                
+            except Exception as e:
+                logger.error(f"❌ 下止盈單時出錯: {str(e)}")
+                logger.error(traceback.format_exc())
     
     def _calculate_tp_offset(self, entry_order, calculation_price):
         """計算止盈價格偏移量"""
@@ -737,3 +777,4 @@ class OrderManager:
 
 # 創建全局訂單管理器實例
 order_manager = OrderManager()
+
