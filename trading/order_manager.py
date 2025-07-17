@@ -1,7 +1,7 @@
 """
 訂單管理模組
 包含所有訂單相關操作，修正重複處理和止盈邏輯問題
-🔥 修正版本：添加trading_results記錄功能
+🔥 完整修復版本：結合舊版本功能 + 新版本安全性改進
 =============================================================================
 """
 import time
@@ -99,6 +99,239 @@ class OrderManager:
             if filled_amount:
                 self.orders[client_order_id]['filled_amount'] = filled_amount
     
+    def handle_new_position_order(self, parsed_signal, tp_percentage):
+        """
+        處理新開倉訂單 - 🔥 修復 order_type 硬編碼問題
+        
+        Args:
+            parsed_signal: 解析後的信號數據
+            tp_percentage: 止盈百分比
+            
+        Returns:
+            dict: 統一格式的訂單結果
+        """
+        try:
+            from utils.helpers import generate_order_id
+            
+            # 生成訂單ID
+            client_order_id = generate_order_id(
+                strategy_name="V69",
+                symbol=parsed_signal['symbol'],
+                side=parsed_signal['side'],
+                counter=self.order_counter
+            )
+            self.order_counter += 1
+            
+            # 🔥 修復：使用 parsed_signal 中的 order_type
+            order_type = parsed_signal.get('order_type', 'MARKET').upper()
+            
+            # 準備訂單數據並保存到本地記錄
+            order_data = {
+                'symbol': parsed_signal['symbol'],
+                'side': parsed_signal['side'],
+                'quantity': parsed_signal['quantity'],
+                'price': parsed_signal.get('price'),
+                'type': order_type,  # 🔥 修復：使用實際的 order_type
+                'status': 'NEW',
+                'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'tp_placed': False,
+                'is_add_position': False,
+                'atr': parsed_signal.get('atr'),
+                'tp_multiplier': parsed_signal.get('tp_multiplier'),
+                'tp_percentage': tp_percentage
+            }
+            
+            # 保存訂單信息到本地記錄
+            self.save_order_info(client_order_id, order_data)
+            
+            # 🔥 修復：創建訂單時使用實際的 order_type
+            order_params = {
+                'symbol': parsed_signal['symbol'],
+                'side': parsed_signal['side'],
+                'order_type': order_type,  # 🔥 修復：使用實際的 order_type
+                'quantity': parsed_signal['quantity'],
+                'client_order_id': client_order_id,
+                'position_side': 'BOTH'
+            }
+            
+            # 🔥 新增：如果是限價單，添加價格參數
+            if order_type == 'LIMIT' and parsed_signal.get('price'):
+                order_params['price'] = parsed_signal['price']
+                order_params['time_in_force'] = 'GTC'
+                logger.info(f"🔍 創建限價單: {parsed_signal['symbol']} {parsed_signal['side']} {parsed_signal['quantity']}@{parsed_signal['price']}")
+            else:
+                logger.info(f"🔍 創建市價單: {parsed_signal['symbol']} {parsed_signal['side']} {parsed_signal['quantity']}")
+            
+            # 執行下單
+            order_result = self.create_order(**order_params)
+            
+            if order_result and order_result.get('status') in ['FILLED', 'NEW', 'PARTIALLY_FILLED']:
+                # 返回統一格式的成功結果
+                return {
+                    'status': 'success',
+                    'client_order_id': client_order_id,
+                    'binance_order_id': order_result.get('orderId'),
+                    'quantity': order_result.get('executedQty', parsed_signal['quantity']),
+                    'filled_price': self._extract_fill_price(order_result),
+                    'order_type': order_type,  # 🔥 新增：返回實際的訂單類型
+                    'tp_client_id': None,  # 止盈單ID稍後由WebSocket處理設置
+                    'tp_price': None       # 止盈價格稍後計算
+                }
+            else:
+                # 返回錯誤結果
+                return {
+                    'status': 'error',
+                    'message': f'{order_type} order execution failed',
+                    'client_order_id': client_order_id,
+                    'order_type': order_type
+                }
+                
+        except Exception as e:
+            logger.error(f"處理新開倉訂單時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {
+                'status': 'error',
+                'message': str(e),
+                'client_order_id': client_order_id if 'client_order_id' in locals() else None,
+                'order_type': order_type if 'order_type' in locals() else 'UNKNOWN'
+            }
+
+
+    # 🔥 同時修復 handle_add_position_order 方法
+
+    def handle_add_position_order(self, parsed_signal, tp_percentage):
+        """
+        處理加倉訂單 - 🔥 修復 order_type 硬編碼問題
+        
+        Args:
+            parsed_signal: 解析後的信號數據
+            tp_percentage: 止盈百分比
+            
+        Returns:
+            dict: 統一格式的訂單結果
+        """
+        try:
+            from utils.helpers import generate_order_id
+            
+            # 生成訂單ID
+            client_order_id = generate_order_id(
+                strategy_name="V69",
+                symbol=parsed_signal['symbol'],
+                side=parsed_signal['side'],
+                counter=self.order_counter
+            )
+            self.order_counter += 1
+            
+            # 🔥 修復：使用 parsed_signal 中的 order_type
+            order_type = parsed_signal.get('order_type', 'MARKET').upper()
+            
+            # 準備訂單數據並保存到本地記錄（標記為加倉）
+            order_data = {
+                'symbol': parsed_signal['symbol'],
+                'side': parsed_signal['side'],
+                'quantity': parsed_signal['quantity'],
+                'price': parsed_signal.get('price'),
+                'type': order_type,  # 🔥 修復：使用實際的 order_type
+                'status': 'NEW',
+                'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'tp_placed': False,
+                'is_add_position': True,  # 🔥 關鍵標記：這是加倉訂單
+                'atr': parsed_signal.get('atr'),
+                'tp_multiplier': parsed_signal.get('tp_multiplier'),
+                'tp_percentage': tp_percentage
+            }
+            
+            # 保存訂單信息到本地記錄
+            self.save_order_info(client_order_id, order_data)
+            
+            # 🔥 修復：創建訂單時使用實際的 order_type
+            order_params = {
+                'symbol': parsed_signal['symbol'],
+                'side': parsed_signal['side'],
+                'order_type': order_type,  # 🔥 修復：使用實際的 order_type
+                'quantity': parsed_signal['quantity'],
+                'client_order_id': client_order_id,
+                'position_side': 'BOTH'
+            }
+            
+            # 🔥 新增：如果是限價單，添加價格參數
+            if order_type == 'LIMIT' and parsed_signal.get('price'):
+                order_params['price'] = parsed_signal['price']
+                order_params['time_in_force'] = 'GTC'
+                logger.info(f"🔍 創建加倉限價單: {parsed_signal['symbol']} {parsed_signal['side']} {parsed_signal['quantity']}@{parsed_signal['price']}")
+            else:
+                logger.info(f"🔍 創建加倉市價單: {parsed_signal['symbol']} {parsed_signal['side']} {parsed_signal['quantity']}")
+            
+            # 執行下單
+            order_result = self.create_order(**order_params)
+            
+            if order_result and order_result.get('status') in ['FILLED', 'NEW', 'PARTIALLY_FILLED']:
+                # 返回統一格式的成功結果
+                return {
+                    'status': 'success',
+                    'client_order_id': client_order_id,
+                    'binance_order_id': order_result.get('orderId'),
+                    'quantity': order_result.get('executedQty', parsed_signal['quantity']),
+                    'filled_price': self._extract_fill_price(order_result),
+                    'order_type': order_type,  # 🔥 新增：返回實際的訂單類型
+                    'tp_client_id': None,  # 止盈單ID稍後由WebSocket處理設置
+                    'tp_price': None       # 止盈價格稍後計算
+                }
+            else:
+                # 返回錯誤結果
+                return {
+                    'status': 'error',
+                    'message': f'Add position {order_type} order execution failed',
+                    'client_order_id': client_order_id,
+                    'order_type': order_type
+                }
+                
+        except Exception as e:
+            logger.error(f"處理加倉訂單時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {
+                'status': 'error',
+                'message': str(e),
+                'client_order_id': client_order_id if 'client_order_id' in locals() else None,
+                'order_type': order_type if 'order_type' in locals() else 'UNKNOWN'
+            }
+
+    def _extract_fill_price(self, order_result):
+        """
+        從訂單結果中提取成交價格 - 🔥 輔助方法
+        
+        Args:
+            order_result: Binance API返回的訂單結果
+            
+        Returns:
+            float: 成交價格
+        """
+        try:
+            # 嘗試從fills中獲取加權平均價格
+            fills = order_result.get('fills', [])
+            if fills:
+                total_qty = 0
+                total_value = 0
+                for fill in fills:
+                    qty = float(fill.get('qty', 0))
+                    price = float(fill.get('price', 0))
+                    total_qty += qty
+                    total_value += qty * price
+                
+                if total_qty > 0:
+                    return total_value / total_qty
+            
+            # 如果沒有fills，嘗試從price字段獲取
+            if 'price' in order_result:
+                return float(order_result['price'])
+            
+            # 如果都沒有，返回0
+            return 0.0
+            
+        except Exception as e:
+            logger.error(f"提取成交價格時出錯: {str(e)}")
+            return 0.0
+
     def handle_order_filled(self, client_order_id, symbol, side, order_type, price, 
                           quantity, executed_qty, position_side, is_add_position):
         """處理訂單成交事件 - 修正版本：添加重複處理保護"""
@@ -186,7 +419,7 @@ class OrderManager:
             logger.error(traceback.format_exc())
             # 確保移除處理標記
             self.processing_orders.discard(client_order_id)
-    
+
     def _handle_early_websocket_fill(self, client_order_id, symbol, side, price, 
                                    quantity, position_side, is_add_position):
         """處理WebSocket提前收到的成交通知"""
@@ -211,180 +444,140 @@ class OrderManager:
             
         except Exception as e:
             logger.error(f"處理提前WebSocket成交通知時出錯: {str(e)}")
-    
+
     def place_tp_order(self, entry_order, is_add_position=False):
-            """
-            下止盈單 - 修復版本
-            
-            🔥 修復內容：
-            1. 止盈單數量合理性檢查
-            2. 實時持倉驗證
-            3. 異常數據拒絕機制
-            """
-            try:
-                # 基本參數提取
-                symbol = entry_order['symbol']
-                side = entry_order['side']
-                quantity = entry_order['quantity']
-                entry_price = float(entry_order['price'])
-                original_client_id = entry_order['client_order_id']
-                position_side = entry_order.get('position_side', 'BOTH')
-                
-                # 🔥 修復1: 緊急數量合理性檢查
-                expected_quantity = float(quantity)
-                logger.info(f"🔍 緊急檢查開始 - 預期數量: {expected_quantity}")
-                
-                # 獲取精度
-                precision = get_symbol_precision(symbol)
-                
-                # 初始數量設定
-                calculation_price = entry_price
-                actual_quantity = expected_quantity
-                
-                # 🔥 修復2: 加倉邏輯修復
-                if is_add_position:
-                    logger.info(f"🔍 處理加倉操作 - {symbol}")
-                    
-                    # 🔥 修復2.1: 實時持倉驗證（多次查詢）
-                    current_positions_1 = binance_client.get_current_positions()
-                    time.sleep(0.3)  # 等待300ms
-                    current_positions_2 = binance_client.get_current_positions()
-                    
-                    if symbol in current_positions_1 and symbol in current_positions_2:
-                        qty_1 = abs(float(current_positions_1[symbol]['positionAmt']))
-                        qty_2 = abs(float(current_positions_2[symbol]['positionAmt']))
-                        
-                        logger.info(f"🔍 持倉雙重驗證:")
-                        logger.info(f"  第一次查詢: {qty_1}")
-                        logger.info(f"  第二次查詢: {qty_2}")
-                        
-                        # 🔥 修復2.2: 數據一致性檢查
-                        if abs(qty_1 - qty_2) > 0.001:
-                            logger.error(f"🚨 持倉數據不一致！使用較小值")
-                            current_qty = min(qty_1, qty_2)
+        """
+        下止盈單 - 🔥 完善版本（結合舊版本功能）
+        
+        Args:
+            entry_order: 入場訂單信息
+            is_add_position: 是否為加倉操作
+        """
+        try:
+            symbol = entry_order['symbol']
+            side = entry_order['side']
+            quantity = entry_order['quantity']
+            entry_price = float(entry_order['price'])
+            position_side = entry_order.get('position_side', 'BOTH')
+            original_client_id = entry_order['client_order_id']
+
+            # 🔥 新增：檢查是否已經有止盈單
+            if original_client_id in self.orders:
+                if self.orders[original_client_id].get('tp_placed'):
+                    logger.info(f"訂單 {original_client_id} 已經設置過止盈單，跳過重複設置")
+                    return
+
+                # 檢查是否有有效的止盈單ID
+                existing_tp_id = self.orders[original_client_id].get('tp_client_id')
+                if existing_tp_id:
+                    logger.info(f"訂單 {original_client_id} 已有止盈單 {existing_tp_id}，先取消再重新設置")
+                    binance_client.cancel_order(symbol, existing_tp_id)
+
+            # 獲取交易對的價格精度
+            precision = get_symbol_precision(symbol)
+
+            # 確定用於計算止盈的基準價格
+            calculation_price = entry_price
+            actual_quantity = quantity
+
+            # 🔥 修正：更嚴格的加倉判斷
+            if is_add_position:
+                # 檢查是否真的有現有持倉（排除剛成交的這筆）
+                current_positions = binance_client.get_current_positions()
+                if symbol in current_positions:
+                    current_qty = abs(float(current_positions[symbol]['positionAmt']))
+                    expected_qty = float(quantity)
+
+                    # 如果持倉數量大於當前訂單數量，才是真正的加倉
+                    if current_qty > expected_qty:
+                        avg_cost, total_qty, success = position_manager.calculate_average_cost_and_quantity(
+                            symbol, entry_price, quantity)
+
+                        if success:
+                            calculation_price = avg_cost
+                            actual_quantity = total_qty
+                            logger.info(f"確認加倉操作 - 使用平均成本 {avg_cost} 計算止盈，總持倉量: {total_qty}")
                         else:
-                            current_qty = qty_2
-                        
-                        # 🔥 修復2.3: 異常檢測
-                        if current_qty > expected_quantity * 3:
-                            logger.error(f"🚨 異常持倉檢測！")
-                            logger.error(f"當前持倉: {current_qty}")
-                            logger.error(f"預期數量: {expected_quantity}")
-                            logger.error(f"比例: {current_qty / expected_quantity:.2f}倍")
-                            
-                            # 拒絕處理異常數據
-                            logger.error(f"❌ 拒絕處理異常持倉數據，使用保守數量")
-                            current_qty = expected_quantity * 2  # 保守估算
-                        
-                        # 加倉計算
-                        if current_qty > expected_quantity:
-                            avg_cost, total_qty, success = position_manager.calculate_average_cost_and_quantity(
-                                symbol, entry_price, quantity)
-                            
-                            if success:
-                                calculation_price = avg_cost
-                                actual_quantity = total_qty
-                                
-                                # 🔥 修復2.4: 最終數量檢查
-                                if actual_quantity > expected_quantity * 4:
-                                    logger.error(f"🚨 計算出的止盈數量異常: {actual_quantity}")
-                                    logger.error(f"⚠️ 強制限制為安全數量: {expected_quantity * 2}")
-                                    actual_quantity = expected_quantity * 2
-                                
-                                logger.info(f"✅ 加倉確認 - 平均成本: {avg_cost}, 總量: {actual_quantity}")
-                            else:
-                                logger.warning(f"⚠️ 平均成本計算失敗，回退到新開倉模式")
-                                is_add_position = False
-                        else:
-                            logger.info(f"💡 持倉數量不符合加倉條件，判定為新開倉")
+                            logger.warning(f"加倉操作 - 平均成本計算失敗，使用新倉位價格 {entry_price}")
                             is_add_position = False
                     else:
-                        logger.warning(f"⚠️ 未找到持倉記錄，判定為新開倉")
+                        logger.info(f"持倉數量 {current_qty} 等於訂單數量 {expected_qty}，判斷為新開倉，不是加倉")
                         is_add_position = False
-                
-                if not is_add_position:
-                    logger.info(f"新開倉操作 - 使用入場價格 {entry_price} 計算止盈")
-                
-                # 🔥 修復3: 最終安全檢查
-                logger.info(f"🔍 最終安全檢查:")
-                logger.info(f"  止盈數量: {actual_quantity}")
-                logger.info(f"  預期數量: {expected_quantity}")
-                logger.info(f"  數量倍數: {actual_quantity / expected_quantity:.2f}")
-                
-                # 超出合理範圍時拒絕
-                if actual_quantity > expected_quantity * 3.5:
-                    logger.error(f"🚨 止盈數量超出安全範圍，強制修正")
-                    actual_quantity = expected_quantity * 2  # 保守設置
-                    logger.warning(f"⚠️ 修正後數量: {actual_quantity}")
-                
-                # 計算止盈價格偏移量
-                tp_price_offset = self._calculate_tp_offset(entry_order, calculation_price)
-                
-                # 檢查最小獲利保護
-                min_tp_offset = calculation_price * MIN_TP_PROFIT_PERCENTAGE
-                if tp_price_offset < min_tp_offset:
-                    logger.info(f"止盈偏移量 {tp_price_offset} 小於最小獲利要求 {min_tp_offset} (0.5%)，調整為最小值")
-                    tp_price_offset = min_tp_offset
                 else:
-                    logger.info(f"止盈偏移量 {tp_price_offset} 滿足最小獲利要求 {min_tp_offset} (0.5%)")
-                
-                # 計算止盈價格
-                if side == 'BUY':
-                    tp_price = round(calculation_price + tp_price_offset, precision)
-                    tp_side = 'SELL'
-                else:  # SELL
-                    tp_price = round(calculation_price - tp_price_offset, precision)
-                    tp_side = 'BUY'
-                
-                logger.info(f"訂單 {original_client_id} 止盈設置:")
-                logger.info(f"  計算基準價: {calculation_price} ({'平均成本' if is_add_position else '入場價'})")
-                logger.info(f"  偏移量: +/-{tp_price_offset}")
-                logger.info(f"  止盈價: {tp_price}")
-                logger.info(f"  總持倉量: {actual_quantity}")
-                logger.info(f"  精度: {precision}")
-                
-                # 生成止盈訂單ID（添加時間戳避免重複）
-                tp_client_id = self._generate_tp_order_id(original_client_id)
-                
-                # 下止盈單 (限價單)
-                tp_order_result = binance_client.place_order(
-                    symbol=symbol,
-                    side=tp_side,
-                    order_type='LIMIT',
-                    quantity=str(actual_quantity),
-                    price=tp_price,
-                    time_in_force='GTC',
-                    client_order_id=tp_client_id,
-                    position_side=position_side
-                )
-                
-                # 更新訂單狀態
-                if original_client_id in self.orders:
-                    self.orders[original_client_id]['tp_placed'] = (tp_order_result is not None)
-                    
-                    if tp_order_result is not None:
-                        self.orders[original_client_id]['tp_client_id'] = tp_client_id
-                        self.orders[original_client_id]['tp_price'] = tp_price
-                        self.orders[original_client_id]['calculation_price'] = calculation_price
-                        self.orders[original_client_id]['final_is_add_position'] = is_add_position
-                        self.orders[original_client_id]['total_quantity'] = actual_quantity
-                    
-                    self.orders[original_client_id]['actual_tp_offset'] = tp_price_offset
-                    
-                logger.info(f"✅ 止盈單處理完成 - 止盈價: {tp_price}, 數量: {actual_quantity}")
-                
-                # 如果啟用止損功能，同時下止損單
-                if ENABLE_STOP_LOSS:
-                    self.place_sl_order(entry_order, calculation_price, actual_quantity, is_add_position)
-                
-            except Exception as e:
-                logger.error(f"❌ 下止盈單時出錯: {str(e)}")
-                logger.error(traceback.format_exc())
-    
+                    logger.info(f"查詢不到 {symbol} 的現有持倉，判斷為新開倉")
+                    is_add_position = False
+
+            if not is_add_position:
+                logger.info(f"新開倉操作 - 使用入場價格 {entry_price} 計算止盈")
+
+            # 計算止盈價格偏移量
+            tp_price_offset = self._calculate_tp_offset(entry_order, calculation_price)
+
+            # 檢查最小獲利保護
+            min_tp_offset = calculation_price * MIN_TP_PROFIT_PERCENTAGE
+            if tp_price_offset < min_tp_offset:
+                logger.info(f"止盈偏移量 {tp_price_offset} 小於最小獲利要求 {min_tp_offset} (0.5%)，調整為最小值")
+                tp_price_offset = min_tp_offset
+            else:
+                logger.info(f"止盈偏移量 {tp_price_offset} 滿足最小獲利要求 {min_tp_offset} (0.5%)")
+
+            # 計算止盈價格
+            if side == 'BUY':
+                tp_price = round(calculation_price + tp_price_offset, precision)
+                tp_side = 'SELL'
+            else:  # SELL
+                tp_price = round(calculation_price - tp_price_offset, precision)
+                tp_side = 'BUY'
+
+            logger.info(f"訂單 {original_client_id} 止盈設置:")
+            logger.info(f"  計算基準價: {calculation_price} ({'平均成本' if is_add_position else '入場價'})")
+            logger.info(f"  偏移量: +/-{tp_price_offset}")
+            logger.info(f"  止盈價: {tp_price}")
+            logger.info(f"  總持倉量: {actual_quantity}")
+            logger.info(f"  精度: {precision}")
+
+            # 生成止盈訂單ID（添加時間戳避免重複）
+            tp_client_id = self._generate_tp_order_id(original_client_id)
+
+            # 下止盈單 (限價單)
+            tp_order_result = self.create_order(
+                symbol=symbol,
+                side=tp_side,
+                order_type='LIMIT',
+                quantity=str(actual_quantity),
+                price=tp_price,
+                time_in_force='GTC',
+                client_order_id=tp_client_id,
+                position_side=position_side
+            )
+
+            # 更新訂單狀態
+            if original_client_id in self.orders:
+                self.orders[original_client_id]['tp_placed'] = (tp_order_result is not None)
+
+                if tp_order_result is not None:
+                    self.orders[original_client_id]['tp_client_id'] = tp_client_id
+                    self.orders[original_client_id]['tp_price'] = tp_price
+                    self.orders[original_client_id]['calculation_price'] = calculation_price
+                    self.orders[original_client_id]['final_is_add_position'] = is_add_position
+                    self.orders[original_client_id]['total_quantity'] = actual_quantity
+
+                self.orders[original_client_id]['actual_tp_offset'] = tp_price_offset
+
+            logger.info(f"✅ 止盈單處理完成 - 止盈價: {tp_price}, 數量: {actual_quantity}")
+
+            # 如果啟用止損功能，同時下止損單
+            if ENABLE_STOP_LOSS:
+                self.place_sl_order(entry_order, calculation_price, actual_quantity, is_add_position)
+
+        except Exception as e:
+            logger.error(f"❌ 下止盈單時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+
     def _calculate_tp_offset(self, entry_order, calculation_price):
         """計算止盈價格偏移量"""
         tp_price_offset = None
-        
+
         # 優先使用預設的價格偏移量
         if 'tp_price_offset' in entry_order and entry_order['tp_price_offset'] is not None:
             tp_price_offset = entry_order['tp_price_offset']
@@ -400,14 +593,14 @@ class OrderManager:
                     logger.info(f"使用ATR計算止盈偏移量 - ATR: {atr_value_float}, 倍數: {tp_multiplier}, 偏移量: {tp_price_offset}")
                 except Exception as e:
                     logger.error(f"計算ATR止盈偏移量時出錯: {str(e)}")
-            
+
             # 如果還是沒有偏移量，使用默認百分比
             if tp_price_offset is None:
                 tp_price_offset = calculation_price * TP_PERCENTAGE
                 logger.info(f"使用默認百分比計算止盈偏移量: {tp_price_offset}")
-        
+
         return tp_price_offset
-    
+
     def place_sl_order(self, entry_order, calculation_price=None, actual_quantity=None, is_add_position=False):
         """
         根據入場單信息下止損單（修正版本：避免重複ID）
@@ -425,40 +618,40 @@ class OrderManager:
             entry_price = float(entry_order['price'])
             position_side = entry_order.get('position_side', 'BOTH')
             original_client_id = entry_order['client_order_id']
-            
+
             if calculation_price is None:
                 calculation_price = entry_price
             if actual_quantity is None:
                 actual_quantity = quantity
-            
+
             # 🔥 新增：檢查是否已經有止損單
             if original_client_id in self.orders:
                 existing_sl_id = self.orders[original_client_id].get('sl_client_id')
                 if existing_sl_id:
                     logger.info(f"訂單 {original_client_id} 已有止損單 {existing_sl_id}，跳過重複設置")
                     return
-            
+
             precision = get_symbol_precision(symbol)
             sl_price_offset = calculation_price * STOP_LOSS_PERCENTAGE
-            
+
             if side == 'BUY':
                 sl_price = round(calculation_price - sl_price_offset, precision)
                 sl_side = 'SELL'
             else:
                 sl_price = round(calculation_price + sl_price_offset, precision)
                 sl_side = 'BUY'
-            
+
             logger.info(f"訂單 {original_client_id} 止損設置:")
             logger.info(f"  計算基準價: {calculation_price} ({'平均成本' if is_add_position else '入場價'})")
             logger.info(f"  止損百分比: {STOP_LOSS_PERCENTAGE:.1%}")
             logger.info(f"  止損價: {sl_price}")
             logger.info(f"  總持倉量: {actual_quantity}")
             logger.info(f"  精度: {precision}")
-            
+
             # 生成止損訂單ID（添加時間戳避免重複）
             sl_client_id = self._generate_sl_order_id(original_client_id)
-            
-            sl_order_result = binance_client.place_order(
+
+            sl_order_result = self.create_order(
                 symbol=symbol,
                 side=sl_side,
                 order_type='STOP_MARKET',
@@ -468,46 +661,46 @@ class OrderManager:
                 client_order_id=sl_client_id,
                 position_side=position_side
             )
-            
+
             if original_client_id in self.orders:
                 self.orders[original_client_id]['sl_placed'] = (sl_order_result is not None)
                 if sl_order_result is not None:
                     self.orders[original_client_id]['sl_client_id'] = sl_client_id
                     self.orders[original_client_id]['sl_price'] = sl_price
                 self.orders[original_client_id]['actual_sl_offset'] = sl_price_offset
-                
+
             logger.info(f"已為訂單 {original_client_id} 下達止損單 - 止損價: {sl_price}, 數量: {actual_quantity}")
-            
+
         except Exception as e:
             logger.error(f"下止損單時出錯: {str(e)}")
             logger.error(traceback.format_exc())
-    
+
     def _generate_tp_order_id(self, original_client_id):
         """生成止盈訂單ID（添加時間戳避免重複）"""
         timestamp_ms = int(time.time() * 1000) % 10000  # 取最後4位毫秒
         base_id_len = len(original_client_id)
-        
+
         if base_id_len > 26:  # 預留空間給時間戳和T後綴
             short_id = original_client_id[:22] + str(timestamp_ms)
             return f"{short_id}T"
         else:
             return f"{original_client_id}{timestamp_ms}T"
-    
+
     def _generate_sl_order_id(self, original_client_id):
         """生成止損訂單ID（添加時間戳避免重複）"""
         timestamp_ms = int(time.time() * 1000) % 10000  # 取最後4位毫秒
         base_id_len = len(original_client_id)
-        
+
         if base_id_len > 26:  # 預留空間給時間戳和S後綴
             short_id = original_client_id[:22] + str(timestamp_ms)
             return f"{short_id}S"
         else:
             return f"{original_client_id}{timestamp_ms}S"
-    
+
     def cancel_existing_tp_orders_for_symbol(self, symbol):
         """取消指定交易對所有現存的止盈單"""
         cancelled_count = 0
-        
+
         for order_id, order_info in self.orders.items():
             if order_info.get('symbol') == symbol:
                 tp_client_id = order_info.get('tp_client_id')
@@ -518,14 +711,14 @@ class OrderManager:
                         cancelled_count += 1
                         order_info['tp_placed'] = False
                         order_info['tp_client_id'] = None
-        
+
         logger.info(f"已取消 {symbol} 的 {cancelled_count} 個止盈單")
         return cancelled_count
-    
+
     def cancel_existing_sl_orders_for_symbol(self, symbol):
         """取消指定交易對所有現存的止損單"""
         cancelled_count = 0
-        
+
         for order_id, order_info in self.orders.items():
             if order_info.get('symbol') == symbol:
                 sl_client_id = order_info.get('sl_client_id')
@@ -536,32 +729,32 @@ class OrderManager:
                         cancelled_count += 1
                         order_info['sl_placed'] = False
                         order_info['sl_client_id'] = None
-        
+
         logger.info(f"已取消 {symbol} 的 {cancelled_count} 個止損單")
         return cancelled_count
-    
+
     # 🔥 關鍵修正：添加trading_results記錄功能
     def handle_tp_filled(self, tp_client_order_id):
         """處理止盈單成交 - 修正版本：記錄trading_results + 取消止損單"""
         for order_id, order_info in self.orders.items():
             if order_info.get('tp_client_id') and tp_client_order_id.startswith(order_info.get('tp_client_id', '')[:20]):
-                
+
                 # 🔥 關鍵新增：記錄交易結果到trading_results表
                 try:
                     self._record_tp_result(order_info)
                     logger.info(f"✅ 止盈交易結果已記錄: {order_id}")
                 except Exception as e:
                     logger.error(f"❌ 記錄止盈結果失敗: {str(e)}")
-                
+
                 # 更新訂單狀態（原有邏輯）
                 self.orders[order_id]['status'] = 'TP_FILLED'
-                
+
                 # 🔥 新增：取消對應的止損單
                 sl_client_id = order_info.get('sl_client_id')
                 if sl_client_id:
                     symbol = order_info.get('symbol')
                     logger.info(f"止盈單 {tp_client_order_id} 已成交，正在取消對應的止損單 {sl_client_id}")
-                    
+
                     cancel_result = binance_client.cancel_order(symbol, sl_client_id)
                     if cancel_result:
                         logger.info(f"成功取消止損單 {sl_client_id}")
@@ -572,7 +765,7 @@ class OrderManager:
                         logger.warning(f"取消止損單 {sl_client_id} 失敗，可能已經被取消或成交")
                 else:
                     logger.info(f"原始訂單 {order_id} 沒有對應的止損單")
-                
+
                 logger.info(f"原始訂單 {order_id} 已通過止盈完成，相關止損單已處理")
                 break
 
@@ -580,23 +773,23 @@ class OrderManager:
         """處理止損單成交 - 修正版本：記錄trading_results + 取消止盈單"""
         for order_id, order_info in self.orders.items():
             if order_info.get('sl_client_id') and sl_client_order_id.startswith(order_info.get('sl_client_id', '')[:20]):
-                
+
                 # 🔥 關鍵新增：記錄交易結果到trading_results表
                 try:
                     self._record_sl_result(order_info)
                     logger.info(f"✅ 止損交易結果已記錄: {order_id}")
                 except Exception as e:
                     logger.error(f"❌ 記錄止損結果失敗: {str(e)}")
-                
+
                 # 更新訂單狀態（原有邏輯）
                 self.orders[order_id]['status'] = 'SL_FILLED'
-                
+
                 # 🔥 新增：取消對應的止盈單
                 tp_client_id = order_info.get('tp_client_id')
                 if tp_client_id:
                     symbol = order_info.get('symbol')
                     logger.info(f"止損單 {sl_client_order_id} 已成交，正在取消對應的止盈單 {tp_client_id}")
-                    
+
                     cancel_result = binance_client.cancel_order(symbol, tp_client_id)
                     if cancel_result:
                         logger.info(f"成功取消止盈單 {tp_client_id}")
@@ -607,10 +800,10 @@ class OrderManager:
                         logger.warning(f"取消止盈單 {tp_client_id} 失敗，可能已經被取消或成交")
                 else:
                     logger.info(f"原始訂單 {order_id} 沒有對應的止盈單")
-                
+
                 logger.info(f"原始訂單 {order_id} 已通過止損完成，相關止盈單已處理")
                 break
-    
+
     # 🔥 新增：交易結果記錄方法
     def _record_tp_result(self, order_info):
         """記錄止盈結果到trading_results表"""
@@ -621,16 +814,16 @@ class OrderManager:
             quantity = float(order_info.get('total_quantity') or order_info.get('quantity', 0))
             side = order_info.get('side')
             entry_time_str = order_info.get('entry_time')
-            
+
             # 計算盈虧
             if side == 'BUY':
                 pnl = (tp_price - entry_price) * quantity
             else:  # SELL
                 pnl = (entry_price - tp_price) * quantity
-            
+
             # 計算持有時間
             holding_time = self._calculate_holding_time(entry_time_str)
-            
+
             # 準備結果數據
             result_data = {
                 'client_order_id': order_info.get('client_order_id'),
@@ -645,24 +838,24 @@ class OrderManager:
                 'is_successful': True,  # 止盈表示成功
                 'holding_time_minutes': holding_time
             }
-            
+
             # 寫入資料庫
             from database import trading_data_manager
             success = trading_data_manager.record_trading_result_by_client_id(
                 order_info.get('client_order_id'), result_data
             )
-            
+
             if success:
                 logger.info(f"止盈結果記錄成功: 盈利 +{pnl:.4f} USDT, 持有時間: {holding_time}分鐘")
             else:
                 logger.error(f"止盈結果記錄失敗")
-                
+
             return success
-            
+
         except Exception as e:
             logger.error(f"記錄止盈結果時出錯: {str(e)}")
             return False
-    
+
     def _record_sl_result(self, order_info):
         """記錄止損結果到trading_results表"""
         try:
@@ -672,16 +865,16 @@ class OrderManager:
             quantity = float(order_info.get('total_quantity') or order_info.get('quantity', 0))
             side = order_info.get('side')
             entry_time_str = order_info.get('entry_time')
-            
+
             # 計算盈虧
             if side == 'BUY':
                 pnl = (sl_price - entry_price) * quantity
             else:  # SELL
                 pnl = (entry_price - sl_price) * quantity
-            
+
             # 計算持有時間
             holding_time = self._calculate_holding_time(entry_time_str)
-            
+
             # 準備結果數據
             result_data = {
                 'client_order_id': order_info.get('client_order_id'),
@@ -696,70 +889,70 @@ class OrderManager:
                 'is_successful': False,  # 止損表示失敗
                 'holding_time_minutes': holding_time
             }
-            
+
             # 寫入資料庫
             from database import trading_data_manager
             success = trading_data_manager.record_trading_result_by_client_id(
                 order_info.get('client_order_id'), result_data
             )
-            
+
             if success:
                 logger.info(f"止損結果記錄成功: 虧損 {pnl:.4f} USDT, 持有時間: {holding_time}分鐘")
             else:
                 logger.error(f"止損結果記錄失敗")
-                
+
             return success
-            
+
         except Exception as e:
             logger.error(f"記錄止損結果時出錯: {str(e)}")
             return False
-    
+
     def _calculate_holding_time(self, entry_time_str):
         """計算持有時間（分鐘）"""
         try:
             if not entry_time_str:
                 return 120  # 預設2小時
-            
+
             # 解析入場時間
             entry_time = datetime.strptime(entry_time_str, '%Y-%m-%d %H:%M:%S')
             current_time = datetime.now()
-            
+
             # 計算時間差
             time_diff = current_time - entry_time
             holding_minutes = int(time_diff.total_seconds() / 60)
-            
+
             return max(holding_minutes, 1)  # 至少1分鐘
-            
+
         except Exception as e:
             logger.error(f"計算持有時間時出錯: {str(e)}")
             return 120  # 預設2小時
-    
+
     def get_orders(self):
         """獲取所有訂單"""
         return self.orders
-    
+
     def get_order(self, client_order_id):
         """獲取特定訂單"""
         return self.orders.get(client_order_id)
-    
+
     def set_webhook_data_recovery_callback(self, callback):
         """設置webhook數據恢復回調函數"""
         self.webhook_data_recovery_callback = callback
-    
+
     def get_processing_orders(self):
         """獲取正在處理的訂單列表（用於調試）"""
         return list(self.processing_orders)
-    
+
     def clear_processing_order(self, client_order_id):
         """清除處理標記（緊急使用）"""
         self.processing_orders.discard(client_order_id)
         logger.info(f"已清除訂單 {client_order_id} 的處理標記")
-    
+
     def get_order_summary(self, client_order_id):
         """獲取訂單摘要信息"""
         if client_order_id not in self.orders:
             return None
-            
+
         order = self.orders[client_order_id]
         return {
             'symbol': order.get('symbol'),
@@ -777,4 +970,3 @@ class OrderManager:
 
 # 創建全局訂單管理器實例
 order_manager = OrderManager()
-

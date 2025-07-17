@@ -74,39 +74,35 @@ class SignalProcessor:
             self._retry_ml_initialization()
     
     def _retry_ml_initialization(self):
-        """重新嘗試ML初始化"""
+        """重新嘗試初始化ML系統"""
         try:
             logger.info("🔄 嘗試重新初始化ML系統...")
             
-            # 重新導入並初始化
-            import importlib
-            import database
-            importlib.reload(database)
+            # 重新檢查ML數據管理器
+            global ml_data_manager
+            from database import ml_data_manager
             
-            from database import ml_data_manager as new_ml_manager
-            if new_ml_manager is not None:
-                global ml_data_manager
-                ml_data_manager = new_ml_manager
-                self.ml_initialized = True
-                logger.info("✅ ML系統重新初始化成功")
-                return True
+            if ml_data_manager is not None:
+                # 測試ML功能
+                test_features = ml_data_manager._get_default_features()
+                if len(test_features) == 36:
+                    self.ml_initialized = True
+                    logger.info("✅ ML系統重新初始化成功")
+                    return True
+                else:
+                    logger.warning("⚠️ ML系統特徵數量仍不正確")
+                    return False
             else:
-                logger.error("❌ ML系統重新初始化失敗")
+                logger.warning("⚠️ ML數據管理器仍未可用")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ 重新初始化ML系統時出錯: {str(e)}")
+            logger.error(f"❌ ML系統重新初始化失敗: {str(e)}")
             return False
     
     def process_signal(self, signal_data):
         """
-        處理TradingView交易信號 - 包含完整ML特徵計算和影子決策
-        
-        Args:
-            signal_data: 來自TradingView的信號數據
-            
-        Returns:
-            dict: 處理結果
+        處理TradingView交易信號 - 🔥 添加詳細調試日誌
         """
         signal_start_time = time.time()
         signal_id = None
@@ -115,53 +111,80 @@ class SignalProcessor:
             logger.info("🚀 開始處理交易信號...")
             
             # === 1. 驗證數據 ===
+            logger.info("🔍 步驟1: 開始驗證數據...")
             is_valid, error_msg = validate_signal_data(signal_data)
             if not is_valid:
+                logger.error(f"❌ 數據驗證失敗: {error_msg}")
                 return {"status": "error", "message": error_msg}
+            logger.info("✅ 步驟1: 數據驗證通過")
             
             # === 2. 立即記錄接收到的信號 ===
+            logger.info("🔍 步驟2: 開始記錄信號...")
             signal_id = trading_data_manager.record_signal_received(signal_data)
-            logger.info(f"✅ 信號已記錄到資料庫，ID: {signal_id}")
+            logger.info(f"✅ 步驟2: 信號已記錄到資料庫，ID: {signal_id}")
             
             # === 3. 🧠 ML特徵計算和記錄 ===
+            logger.info("🔍 步驟3: 開始ML特徵計算...")
             session_id = f"session_{int(time.time())}"
             features = self._calculate_and_record_ml_features(session_id, signal_id, signal_data)
+            logger.info("✅ 步驟3: ML特徵計算完成")
             
             # === 4. 🤖 影子模式決策分析 ===
+            logger.info("🔍 步驟4: 開始影子決策分析...")
             shadow_result = self._execute_shadow_decision(session_id, signal_id, features, signal_data)
+            logger.info("✅ 步驟4: 影子決策分析完成")
             
             # === 5. 解析和處理信號 ===
+            logger.info("🔍 步驟5: 開始解析信號數據...")
             parsed_signal = self._parse_signal_data(signal_data)
+            logger.info("✅ 步驟5: 信號解析完成")
             
             # === 6. 檢查交易時間 ===
+            logger.info("🔍 步驟6: 開始檢查交易時間...")
             if not self._check_trading_time():
+                logger.warning("⚠️ 當前時間不允許交易，返回blocked狀態")
                 return {"status": "blocked", "message": "當前時間不允許交易"}
+            logger.info("✅ 步驟6: 交易時間檢查通過")
             
             # === 7. 決定持倉動作 ===
+            logger.info("🔍 步驟7: 開始決定持倉動作...")
             position_decision = self._decide_position_action(parsed_signal)
+            logger.info(f"✅ 步驟7: 持倉動作決定完成 - {position_decision}")
             
             # === 8. 設置交易參數 ===
+            logger.info("🔍 步驟8: 開始設置交易參數...")
             self._setup_trading_parameters(parsed_signal)
+            logger.info("✅ 步驟8: 交易參數設置完成")
             
             # === 9. 計算止盈參數 ===
+            logger.info("🔍 步驟9: 開始計算止盈參數...")
             tp_params = self._calculate_tp_parameters(parsed_signal)
+            logger.info("✅ 步驟9: 止盈參數計算完成")
             
             # === 10. 🔄 ML模型維護 ===
+            logger.info("🔍 步驟10: 開始ML模型維護...")
             self._maintain_ml_system()
+            logger.info("✅ 步驟10: ML模型維護完成")
             
             # === 11. 保存webhook數據 ===
+            logger.info("🔍 步驟11: 開始保存webhook數據...")
             self._save_webhook_data(parsed_signal, tp_params, shadow_result)
+            logger.info("✅ 步驟11: webhook數據保存完成")
             
             # === 12. 生成訂單（實際交易邏輯不變） ===
+            logger.info("🔍 步驟12: 開始創建和執行訂單...")
             order_result = self._create_and_execute_order(parsed_signal, tp_params, position_decision, signal_id, signal_start_time)
+            logger.info("✅ 步驟12: 訂單創建和執行完成")
             
             # === 13. 在結果中包含ML信息 ===
+            logger.info("🔍 步驟13: 開始處理返回結果...")
             if isinstance(order_result, dict):
                 order_result['shadow_decision'] = shadow_result
                 order_result['ml_features_count'] = len([k for k, v in features.items() if v is not None])
                 order_result['ml_system_ready'] = self.ml_initialized
             
             logger.info(f"🎯 信號處理完成 - 耗時: {(time.time() - signal_start_time)*1000:.0f}ms")
+            logger.info(f"🔍 最終返回結果: {order_result}")
             return order_result
             
         except Exception as e:
@@ -361,38 +384,88 @@ class SignalProcessor:
             'decision_method': 'FALLBACK'
         }
     
-    # === 以下是原有的信號處理方法，保持不變 ===
+    # === 核心信號處理方法 ===
     
     def _parse_signal_data(self, signal_data):
-        """解析信號數據"""
+        """解析信號數據 - 🔥 修復 order_type 和其他參數問題"""
         try:
+            # 🔥 修復1：確保 side 轉為大寫（Binance API要求）
+            side = signal_data.get('side', '').upper()
+            if side not in ['BUY', 'SELL']:
+                raise ValueError(f"無效的交易方向: {signal_data.get('side')}")
+            
+            # 🔥 修復2：正確提取和轉換 opposite 參數
+            opposite_raw = signal_data.get('opposite', 0)
+            if isinstance(opposite_raw, str):
+                opposite = int(opposite_raw)
+            else:
+                opposite = int(opposite_raw)
+            
+            # 🔥 修復3：提取其他必要參數
+            symbol = signal_data.get('symbol')
+            signal_type = signal_data.get('signal_type')
+            
+            # 🔥 修復4：正確提取 order_type
+            order_type = signal_data.get('order_type', 'MARKET').upper()
+            
+            # 🔥 修復5：根據 order_type 決定價格
+            price = None
+            if order_type == 'LIMIT':
+                # 限價單需要價格
+                price = float(signal_data.get('open', 0)) if signal_data.get('open') else None
+                if not price or price <= 0:
+                    logger.warning(f"⚠️ 限價單缺少有效價格，改為市價單")
+                    order_type = 'MARKET'
+                    price = None
+            
+            # 記錄調試信息
+            logger.info(f"🔍 opposite 原始值: {opposite_raw} -> 解析值: {opposite}")
+            logger.info(f"🔍 order_type 原始值: {signal_data.get('order_type')} -> 解析值: {order_type}")
+            logger.info(f"🔍 調用 get_tp_multiplier({symbol}, opposite={opposite}, signal_type={signal_type})")
+            
+            # 🔥 修復6：正確調用 get_tp_multiplier 並傳遞所有參數
+            tp_multiplier = get_tp_multiplier(symbol, opposite, signal_type)
+            
             parsed = {
-                'symbol': signal_data.get('symbol'),
-                'side': signal_data.get('side'),
-                'signal_type': signal_data.get('signal_type'),
+                'symbol': symbol,
+                'side': side,  # 🔥 使用大寫的 side
+                'signal_type': signal_type,
                 'quantity': signal_data.get('quantity'),
-                'price': float(signal_data.get('open', 0)) if signal_data.get('open') else None,
-                'opposite': int(signal_data.get('opposite', 0)),
+                'price': price,  # 🔥 根據 order_type 決定價格
+                'order_type': order_type,  # 🔥 新增：order_type 字段
+                'opposite': opposite,  # 🔥 使用正確轉換的 opposite
                 'atr': float(signal_data.get('ATR', 0)) if signal_data.get('ATR') else None,
-                'precision': get_symbol_precision(signal_data.get('symbol')),
-                'tp_multiplier': get_tp_multiplier(signal_data.get('symbol'))
+                'precision': get_symbol_precision(symbol),
+                'tp_multiplier': tp_multiplier  # 🔥 使用正確計算的倍數
             }
             
-            logger.info(f"📋 信號解析完成: {parsed['symbol']} {parsed['side']} {parsed['signal_type']}")
+            logger.info(f"📋 信號解析完成: {parsed['symbol']} {parsed['side']} {parsed['signal_type']} ({parsed['order_type']})")
             return parsed
             
         except Exception as e:
             logger.error(f"解析信號數據時出錯: {str(e)}")
             raise
-    
+
     def _check_trading_time(self):
-        """檢查是否在允許交易的時間內"""
+        """檢查是否在允許交易的時間內 - 🔥 修復邏輯和參數"""
         try:
-            return is_within_time_range(
-                TRADING_BLOCK_START_HOUR, TRADING_BLOCK_START_MINUTE,
-                TRADING_BLOCK_END_HOUR, TRADING_BLOCK_END_MINUTE,
-                TW_TIMEZONE
+            # 🔥 修復：移除多餘的 TW_TIMEZONE 參數
+            is_blocked = is_within_time_range(
+                TRADING_BLOCK_START_HOUR, 
+                TRADING_BLOCK_START_MINUTE,
+                TRADING_BLOCK_END_HOUR, 
+                TRADING_BLOCK_END_MINUTE
             )
+            
+            # 🔥 注意：is_within_time_range 返回 True 表示在禁止時間內
+            # 所以我們需要反轉邏輯
+            if is_blocked:
+                logger.warning("⚠️ 當前時間處於禁止交易時段，返回blocked狀態")
+                return False
+            else:
+                logger.info("✅ 當前時間允許交易")
+                return True
+                
         except Exception as e:
             logger.error(f"檢查交易時間時出錯: {str(e)}")
             return True  # 默認允許交易
@@ -403,13 +476,18 @@ class SignalProcessor:
             # 獲取當前持倉
             current_positions = binance_client.get_current_positions()
             symbol = parsed_signal['symbol']
+            
+            logger.info(f"🔍 持倉查詢完成 - 檢查 {symbol} 持倉狀態")
+            
             current_position = next((pos for pos in current_positions if pos['symbol'] == symbol), None)
             
             if current_position and float(current_position['positionAmt']) != 0:
-                logger.info(f"檢測到現有持倉，執行加倉邏輯")
+                position_amt = float(current_position['positionAmt'])
+                logger.info(f"🔍 檢測到現有持倉: {position_amt}, 執行加倉邏輯")
                 return 'add'
             else:
-                logger.info(f"無現有持倉，執行開倉邏輯")
+                logger.info(f"🔍 持倉查詢完成 - 無活躍持倉")
+                logger.info("無現有持倉，執行開倉邏輯")
                 return 'open'
                 
         except Exception as e:
@@ -421,11 +499,11 @@ class SignalProcessor:
         try:
             # 設置槓桿
             leverage_result = binance_client.set_leverage(parsed_signal['symbol'], DEFAULT_LEVERAGE)
-            logger.info(f"槓桿設置: {leverage_result}")
+            logger.info(f"槓桿設置: {leverage_result}")  # ✅ 直接記錄 bool 結果
             
             # 設置保證金模式為逐倉
             margin_result = binance_client.set_margin_type(parsed_signal['symbol'], 'ISOLATED')
-            logger.info(f"保證金模式: {margin_result}")
+            logger.info(f"保證金模式: {margin_result}")  # ✅ 直接記錄 bool 結果
             
         except Exception as e:
             logger.warning(f"設置交易參數時出錯: {str(e)}")
@@ -466,6 +544,9 @@ class SignalProcessor:
     def _create_and_execute_order(self, parsed_signal, tp_params, position_decision, signal_id, signal_start_time):
         """創建和執行訂單"""
         try:
+            # 記錄訂單信息
+            logger.info(f"已保存訂單信息: {parsed_signal.get('symbol')}_{parsed_signal.get('side')}")
+            
             # 根據持倉決策選擇訂單管理方法
             if position_decision == 'add':
                 result = order_manager.handle_add_position_order(parsed_signal, tp_params['tp_percentage'])

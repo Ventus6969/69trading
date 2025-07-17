@@ -1,7 +1,7 @@
 """
 WebSocket連接管理模組
 處理幣安WebSocket連接和訂單狀態更新
-🔥 Phase 1修復版：新增止盈/止損單關聯自動取消機制
+🔥 Phase 1修復版：新增止盈/止損單關聯自動取消機制 + 價格獲取修復
 =============================================================================
 """
 import json
@@ -94,7 +94,7 @@ class WebSocketManager:
         logger.warning(f"WebSocket連接關閉: {close_status_code} - {close_msg}")
     
     def on_message(self, ws, message):
-        """WebSocket消息處理函數 - 🔥 Phase 1修復版"""
+        """WebSocket消息處理函數 - 🔥 Phase 1修復版 + 價格獲取修復"""
         try:
             data = json.loads(message)
             
@@ -106,11 +106,31 @@ class WebSocketManager:
                 symbol = order_data["s"]
                 side = order_data["S"]
                 order_type = order_data["o"]
-                price = order_data["p"]
                 quantity = order_data["q"]
                 executed_qty = order_data["z"]  # 累計成交量
                 
+                # 🔥 核心修復：正確獲取成交價格
+                avg_price = order_data.get("ap", "0")      # 平均成交價
+                limit_price = order_data.get("p", "0")     # 限價
+                last_price = order_data.get("L", "0")      # 最後成交價
+                
+                # 智能價格選擇邏輯
+                if avg_price and float(avg_price) > 0:
+                    price = avg_price
+                    price_source = "平均成交價(ap)"
+                elif last_price and float(last_price) > 0:
+                    price = last_price
+                    price_source = "最後成交價(L)"
+                else:
+                    price = limit_price
+                    price_source = "限價(p)"
+                
                 logger.info(f"訂單更新: {client_order_id} - {symbol} - {side} - {order_status} - 成交量: {executed_qty}/{quantity}")
+                logger.info(f"🔍 WebSocket價格修復:")
+                logger.info(f"  平均成交價(ap): {avg_price}")
+                logger.info(f"  限價(p): {limit_price}")
+                logger.info(f"  最後成交價(L): {last_price}")
+                logger.info(f"  最終選擇: {price} (來源: {price_source})")
                 
                 # 🔥 Phase 1修復：新增止盈/止損單關聯處理
                 self._handle_tp_sl_completion(client_order_id, order_status)
@@ -125,6 +145,16 @@ class WebSocketManager:
                     # 過濾邏輯：只處理系統訂單
                     if not client_order_id.startswith('V69_'):
                         logger.info(f"檢測到非系統訂單ID: {client_order_id}，跳過自動止盈設置")
+                        return
+                    
+                    # 🔥 新增：價格有效性驗證
+                    try:
+                        price_float = float(price)
+                        if price_float <= 0:
+                            logger.error(f"🚨 獲取到無效價格: {price}，跳過處理")
+                            return
+                    except (ValueError, TypeError):
+                        logger.error(f"🚨 價格格式錯誤: {price}，跳過處理")
                         return
                         
                     # 優化本地記錄檢查，增加等待機制
@@ -169,12 +199,15 @@ class WebSocketManager:
                         logger.info(f"確認新開倉操作 - {symbol}")
                         
                     # 核心改進：統一調用訂單管理器處理成交
+                    logger.info(f"🚀 即將調用 handle_order_filled，傳遞參數:")
+                    logger.info(f"  price: {price} (修復後的正確價格)")
+                    logger.info(f"  quantity: {quantity}")
                     order_manager.handle_order_filled(
                         client_order_id=client_order_id,
                         symbol=symbol,
                         side=side,
                         order_type=order_type,
-                        price=price,
+                        price=price,  # 🔥 現在傳遞正確的價格
                         quantity=quantity,
                         executed_qty=executed_qty,
                         position_side=order_data.get('ps', 'BOTH'),
