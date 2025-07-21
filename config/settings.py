@@ -88,7 +88,7 @@ DEFAULT_TP_MULTIPLIER = 1.0
 MIN_TP_PROFIT_PERCENTAGE = 0.0045  # 0.45%
 
 # 止損設定
-STOP_LOSS_PERCENTAGE = 0.02  # 2% 止損
+STOP_LOSS_PERCENTAGE = 0.012  # 2% 止損
 ENABLE_STOP_LOSS = True  # 是否啟用止損功能
 
 # =============================================================================
