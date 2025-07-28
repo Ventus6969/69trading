@@ -811,7 +811,11 @@ class OrderManager:
             from utils.helpers import generate_order_id
             
             # 生成訂單ID
-            client_order_id = generate_order_id(parsed_signal['symbol'], parsed_signal['side'])
+            client_order_id = generate_order_id(
+                parsed_signal.get('strategy_name', parsed_signal.get('signal_type', 'trading')),
+                parsed_signal['symbol'], 
+                parsed_signal['side']
+            )
             
             # 🔥 修復：正確使用信號中的 order_type，不再硬編碼
             order_type = parsed_signal.get('order_type', 'MARKET').upper()
@@ -868,6 +872,83 @@ class OrderManager:
                 'order_type': order_type if 'order_type' in locals() else 'UNKNOWN'
             }
 
+    def handle_new_position_order(self, parsed_signal, tp_percentage):
+        """
+        處理新開倉訂單 - 🔥 支援 tp_percentage 參數的版本
+        
+        Args:
+            parsed_signal: 解析後的信號數據
+            tp_percentage: 止盈百分比
+            
+        Returns:
+            dict: 統一格式的訂單結果
+        """
+        try:
+            from utils.helpers import generate_order_id
+            
+            # 生成訂單ID
+            client_order_id = generate_order_id(
+                parsed_signal.get('strategy_name', parsed_signal.get('signal_type', 'trading')),
+                parsed_signal['symbol'], 
+                parsed_signal['side']
+            )
+            
+            # 🔥 修復：正確使用信號中的 order_type，不再硬編碼
+            order_type = parsed_signal.get('order_type', 'MARKET').upper()
+            
+            # 準備訂單參數
+            order_params = {
+                'symbol': parsed_signal['symbol'],
+                'side': parsed_signal['side'].upper(),
+                'order_type': order_type,  # 🔥 修復：使用正確的 order_type
+                'quantity': parsed_signal['quantity'],
+                'client_order_id': client_order_id,
+                'position_side': 'BOTH'
+            }
+            
+            # 🔥 新增：如果是限價單，添加價格參數
+            if order_type == 'LIMIT' and parsed_signal.get('price'):
+                order_params['price'] = parsed_signal['price']
+                order_params['time_in_force'] = 'GTC'
+                logger.info(f"🔍 創建限價單: {parsed_signal['symbol']} {parsed_signal['side']} {parsed_signal['quantity']}@{parsed_signal['price']}")
+            else:
+                logger.info(f"🔍 創建市價單: {parsed_signal['symbol']} {parsed_signal['side']} {parsed_signal['quantity']}")
+            
+            # 執行下單
+            order_result = self.create_order(**order_params)
+            
+            if order_result and order_result.get('status') in ['FILLED', 'NEW', 'PARTIALLY_FILLED']:
+                # 返回統一格式的成功結果
+                return {
+                    'status': 'success',
+                    'client_order_id': client_order_id,
+                    'binance_order_id': order_result.get('orderId'),
+                    'quantity': order_result.get('executedQty', parsed_signal['quantity']),
+                    'filled_price': self._extract_fill_price(order_result),
+                    'order_type': order_type,  # 🔥 新增：返回實際的訂單類型
+                    'tp_client_id': None,  # 止盈單ID稍後由WebSocket處理設置
+                    'tp_price': None,      # 止盈價格稍後計算
+                    'tp_percentage': tp_percentage  # 🔥 新增：保存 tp_percentage 以供後續使用
+                }
+            else:
+                # 返回錯誤結果
+                return {
+                    'status': 'error',
+                    'message': f'{order_type} order execution failed',
+                    'client_order_id': client_order_id,
+                    'order_type': order_type
+                }
+                
+        except Exception as e:
+            logger.error(f"處理新開倉訂單時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {
+                'status': 'error',
+                'message': str(e),
+                'client_order_id': client_order_id if 'client_order_id' in locals() else None,
+                'order_type': order_type if 'order_type' in locals() else 'UNKNOWN'
+            }
+
     def handle_add_position_order(self, parsed_signal, tp_percentage):
         """
         處理加倉訂單 - 🔥 修復 order_type 硬編碼問題
@@ -883,7 +964,11 @@ class OrderManager:
             from utils.helpers import generate_order_id
             
             # 生成訂單ID
-            client_order_id = generate_order_id(parsed_signal['symbol'], parsed_signal['side'])
+            client_order_id = generate_order_id(
+                parsed_signal.get('strategy_name', parsed_signal.get('signal_type', 'trading')),
+                parsed_signal['symbol'], 
+                parsed_signal['side']
+            )
             
             # 🔥 修復：正確使用信號中的 order_type，不再硬編碼
             order_type = parsed_signal.get('order_type', 'MARKET').upper()

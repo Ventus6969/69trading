@@ -408,15 +408,34 @@ class SignalProcessor:
             # 🔥 修復4：正確提取 order_type
             order_type = signal_data.get('order_type', 'MARKET').upper()
             
-            # 🔥 修復5：根據 order_type 決定價格
+            # 🔥 修復5：根據 order_type 和 opposite 決定價格
             price = None
             if order_type == 'LIMIT':
-                # 限價單需要價格
-                price = float(signal_data.get('open', 0)) if signal_data.get('open') else None
+                # 限價單需要價格，根據 opposite 參數選擇正確的價格欄位
+                if opposite == 0:
+                    # 當前收盤價模式
+                    price = float(signal_data.get('close', 0)) if signal_data.get('close') else None
+                    price_source = "close (當前收盤價)"
+                elif opposite == 1:
+                    # 前根收盤價模式
+                    price = float(signal_data.get('prev_close', 0)) if signal_data.get('prev_close') else None
+                    price_source = "prev_close (前根收盤價)"
+                elif opposite == 2:
+                    # 前根開盤價模式
+                    price = float(signal_data.get('prev_open', 0)) if signal_data.get('prev_open') else None
+                    price_source = "prev_open (前根開盤價)"
+                else:
+                    # 未知模式，使用當前收盤價作為備案
+                    price = float(signal_data.get('close', 0)) if signal_data.get('close') else None
+                    price_source = "close (備案:當前收盤價)"
+                    logger.warning(f"⚠️ 未知的opposite值: {opposite}，使用當前收盤價作為備案")
+                
                 if not price or price <= 0:
-                    logger.warning(f"⚠️ 限價單缺少有效價格，改為市價單")
+                    logger.warning(f"⚠️ 限價單缺少有效價格 (來源: {price_source})，改為市價單")
                     order_type = 'MARKET'
                     price = None
+                else:
+                    logger.info(f"🔍 限價單價格來源: {price_source} = {price}")
             
             # 記錄調試信息
             logger.info(f"🔍 opposite 原始值: {opposite_raw} -> 解析值: {opposite}")
