@@ -417,9 +417,17 @@ class SignalProcessor:
                     price = float(signal_data.get('close', 0)) if signal_data.get('close') else None
                     price_source = "close (當前收盤價)"
                 elif opposite == 1:
-                    # 前根收盤價模式
-                    price = float(signal_data.get('prev_close', 0)) if signal_data.get('prev_close') else None
-                    price_source = "prev_close (前根收盤價)"
+                    # 🎯 reversal_buy專用：前根收盤價-1%折扣策略
+                    base_price = float(signal_data.get('prev_close', 0)) if signal_data.get('prev_close') else None
+                    if base_price and signal_type == 'reversal_buy':
+                        # reversal_buy策略使用1%折扣
+                        discount_amount = base_price * 0.01
+                        price = base_price - discount_amount
+                        price_source = f"reversal_buy低1%策略 ({base_price:.6f} - {discount_amount:.6f} = {price:.6f})"
+                    else:
+                        # 其他策略使用前根收盤價
+                        price = base_price
+                        price_source = "prev_close (前根收盤價)"
                 elif opposite == 2:
                     # 前根開盤價模式
                     price = float(signal_data.get('prev_open', 0)) if signal_data.get('prev_open') else None
