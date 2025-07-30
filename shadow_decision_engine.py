@@ -595,12 +595,26 @@ class ShadowModeDecisionEngine:
                                signal_data: Dict[str, Any]) -> bool:
         """記錄影子決策到資料庫"""
         try:
-            # 暫時簡化，避免複雜的數據庫操作
-            logger.info(f"✅ 影子決策記錄 - signal_id: {signal_id}, 建議: {decision_result.get('recommendation')}")
-            return True
+            # 🔥 修復：真正寫入資料庫而非僅記錄log
+            from database import ml_data_manager
+            
+            if ml_data_manager is None:
+                logger.warning("ML數據管理器未初始化，無法記錄影子決策")
+                return False
+            
+            # 調用ML數據管理器記錄影子決策
+            success = ml_data_manager.record_shadow_decision(session_id, signal_id, decision_result)
+            
+            if success:
+                logger.info(f"✅ 影子決策記錄 - signal_id: {signal_id}, 建議: {decision_result.get('recommendation')}")
+            else:
+                logger.warning(f"⚠️ 影子決策記錄失敗 - signal_id: {signal_id}")
+            
+            return success
             
         except Exception as e:
             logger.error(f"記錄影子決策時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
             return False
     
     def _log_decision_details_for_signal(self, signal_id: int, decision_result: Dict[str, Any], 
