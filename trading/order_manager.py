@@ -896,6 +896,26 @@ class OrderManager:
             # 🔥 修復：正確使用信號中的 order_type，不再硬編碼
             order_type = parsed_signal.get('order_type', 'MARKET').upper()
             
+            # 🔥 方案1：預先記錄訂單到本地，避免WebSocket競爭條件
+            logger.info(f"🔄 預先記錄訂單到本地: {client_order_id}")
+            self.orders[client_order_id] = {
+                'symbol': parsed_signal['symbol'],
+                'side': parsed_signal['side'].upper(),
+                'quantity': parsed_signal['quantity'],
+                'price': parsed_signal.get('price'),
+                'type': order_type,
+                'status': 'PENDING',  # 標記為等待發送狀態
+                'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'tp_placed': False,
+                'sl_placed': False,
+                'tp_percentage': tp_percentage,
+                'position_side': 'BOTH',
+                'atr': parsed_signal.get('atr'),
+                'tp_multiplier': parsed_signal.get('tp_multiplier'),
+                'waiting_for_api_response': True,  # 標記正在等待API響應
+                'created_at': time.time()
+            }
+            
             # 準備訂單參數
             order_params = {
                 'symbol': parsed_signal['symbol'],

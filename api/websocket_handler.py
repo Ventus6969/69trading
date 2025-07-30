@@ -161,15 +161,46 @@ class WebSocketManager:
                     if client_order_id not in order_manager.orders:
                         logger.warning(f"WebSocket收到訂單 {client_order_id} 成交通知，但本地記錄中未找到")
                         
-                        # 等待API響應（最多等待2秒）
-                        for wait_count in range(4):  # 4次 x 0.5秒 = 2秒
-                            time.sleep(0.5)
+                        # 🔥 方案2：增強重試機制（指數退避策略）
+                        logger.info(f"🔄 開始重試尋找訂單: {client_order_id}")
+                        found_order = False
+                        
+                        for attempt in range(6):  # 增加到6次嘗試
+                            wait_time = 0.2 * (2 ** attempt)  # 指數退避: 0.2s, 0.4s, 0.8s, 1.6s, 3.2s, 6.4s
+                            max_wait = min(wait_time, 2.0)  # 最大等待時間限制為2秒
+                            
+                            logger.info(f"🔍 嘗試 {attempt + 1}/6 尋找訂單 {client_order_id}, 等待 {max_wait:.1f}s")
+                            time.sleep(max_wait)
+                            
                             if client_order_id in order_manager.orders:
-                                logger.info(f"等待 {(wait_count + 1) * 0.5}秒後找到訂單記錄: {client_order_id}")
+                                logger.info(f"✅ 第 {attempt + 1} 次嘗試成功找到訂單: {client_order_id}")
+                                found_order = True
                                 break
-                        else:
-                            logger.error(f"等待2秒後仍未找到訂單 {client_order_id} 的本地記錄，跳過處理")
-                            return
+                        
+                        if not found_order:
+                            logger.error(f"❌ 6次重試後仍未找到訂單 {client_order_id} 的本地記錄，可能是併發問題")
+                            
+                            # 🔥 最後嘗試：使用WebSocket數據創建臨時記錄
+                            logger.warning(f"🚨 嘗試使用WebSocket數據創建臨時訂單記錄: {client_order_id}")
+                            try:
+                                order_manager.orders[client_order_id] = {
+                                    'symbol': symbol,
+                                    'side': side,
+                                    'quantity': executed_qty,
+                                    'price': price,
+                                    'type': 'UNKNOWN',
+                                    'status': 'FILLED',
+                                    'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                    'tp_placed': False,
+                                    'sl_placed': False,
+                                    'position_side': 'BOTH',
+                                    'created_from_websocket': True,  # 標記來源
+                                    'created_at': time.time()
+                                }
+                                logger.info(f"✅ 成功創建臨時訂單記錄: {client_order_id}")
+                            except Exception as e:
+                                logger.error(f"❌ 創建臨時訂單記錄失敗: {str(e)}")
+                                return
                     
                     # 更寬鬆的訂單記錄驗證
                     order_record = order_manager.orders[client_order_id]
