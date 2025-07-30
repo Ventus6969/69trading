@@ -449,6 +449,7 @@ class SignalProcessor:
                 'symbol': symbol,
                 'side': side,  # 🔥 使用大寫的 side
                 'signal_type': signal_type,
+                'strategy_name': signal_data.get('strategy_name'),  # 🔥 新增：strategy_name 字段
                 'quantity': signal_data.get('quantity'),
                 'price': price,  # 🔥 根據 order_type 決定價格
                 'order_type': order_type,  # 🔥 新增：order_type 字段
