@@ -306,33 +306,74 @@ class MLDataManager:
             return False
     
     def record_shadow_decision(self, session_id: str, signal_id: int, decision_result: Dict[str, Any]) -> bool:
-        """記錄影子決策結果到資料庫"""
+        """記錄影子決策結果到資料庫 - 🛡️ 強化錯誤處理 + 自動表結構適配"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                cursor.execute('''
-                    INSERT OR REPLACE INTO ml_signal_quality (
-                        session_id, signal_id, decision_method, recommendation,
-                        confidence_score, execution_probability, trading_probability,
-                        risk_level, reason, suggested_price_adjustment
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
+                # 🛡️ 先檢查表結構是否完整
+                cursor.execute("PRAGMA table_info(ml_signal_quality)")
+                columns = [column[1] for column in cursor.fetchall()]
+                
+                # 基礎必要欄位
+                base_fields = ['session_id', 'signal_id', 'decision_method', 'recommendation', 'confidence_score']
+                
+                # 所有可能的擴展欄位（支持未來擴展）
+                all_possible_fields = {
+                    'execution_probability': decision_result.get('execution_probability', 0.5),
+                    'trading_probability': decision_result.get('trading_probability', 0.5),
+                    'risk_level': decision_result.get('risk_level', 'MEDIUM'),
+                    'reason': decision_result.get('reason', ''),
+                    'suggested_price_adjustment': decision_result.get('suggested_price_adjustment', 0.0),
+                    'created_at': datetime.now().isoformat(),
+                    # 🚀 未來可能的欄位（預留空間）
+                    'ml_model_version': decision_result.get('ml_model_version', ''),
+                    'feature_importance_score': decision_result.get('feature_importance_score', 0.0),
+                    'market_condition_score': decision_result.get('market_condition_score', 0.0)
+                }
+                
+                # 🔍 自動檢測可用欄位
+                available_optional_fields = {k: v for k, v in all_possible_fields.items() if k in columns}
+                available_fields = base_fields + list(available_optional_fields.keys())
+                
+                # 🔧 如果檢測到缺失重要欄位，記錄建議
+                missing_important_fields = [f for f in ['trading_probability', 'execution_probability'] if f not in columns]
+                if missing_important_fields:
+                    logger.warning(f"⚠️ 檢測到缺失重要欄位: {missing_important_fields}")
+                    logger.warning("💡 建議運行: python fix_database_schema.py")
+                
+                # 動態構建SQL
+                placeholders = ', '.join(['?' for _ in available_fields])
+                sql = f'''
+                    INSERT OR REPLACE INTO ml_signal_quality ({', '.join(available_fields)})
+                    VALUES ({placeholders})
+                '''
+                
+                # 準備參數值
+                values = [
                     session_id, signal_id,
                     decision_result.get('decision_method', 'RULE_BASED'),
                     decision_result.get('recommendation', 'EXECUTE'),
-                    decision_result.get('confidence', 0.5),
-                    decision_result.get('execution_probability', 0.5),
-                    decision_result.get('trading_probability', 0.5),
-                    decision_result.get('risk_level', 'MEDIUM'),
-                    decision_result.get('reason', ''),
-                    decision_result.get('suggested_price_adjustment', 0.0)
-                ))
+                    decision_result.get('confidence', 0.5)
+                ]
                 
+                # 添加可選欄位值
+                values.extend(available_optional_fields.values())
+                
+                cursor.execute(sql, values)
                 conn.commit()
                 logger.info(f"✅ 影子決策記錄成功 - session_id: {session_id}, signal_id: {signal_id}")
+                logger.debug(f"🔍 使用欄位: {len(available_fields)}/{len(base_fields) + len(all_possible_fields)}個")
                 return True
                 
+        except sqlite3.Error as e:
+            logger.error(f"🛡️ 資料庫錯誤 - 影子決策記錄: {str(e)}")
+            logger.error(f"💡 可能的解決方案: 運行 fix_database_schema.py 修復表結構")
+            return False
+        except Exception as e:
+            logger.error(f"❌ 記錄影子決策時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            return False
         except Exception as e:
             logger.error(f"❌ 記錄影子決策時出錯: {str(e)}")
             logger.error(traceback.format_exc())

@@ -102,7 +102,7 @@ class SignalProcessor:
     
     def process_signal(self, signal_data):
         """
-        處理TradingView交易信號 - 🔥 添加詳細調試日誌
+        處理TradingView交易信號 - 🛡️ 強化錯誤處理避免HTTP 500
         """
         signal_start_time = time.time()
         signal_id = None
@@ -115,66 +115,108 @@ class SignalProcessor:
             is_valid, error_msg = validate_signal_data(signal_data)
             if not is_valid:
                 logger.error(f"❌ 數據驗證失敗: {error_msg}")
-                return {"status": "error", "message": error_msg}
+                return {"status": "error", "message": f"數據驗證失敗: {error_msg}", "error_type": "validation"}
             logger.info("✅ 步驟1: 數據驗證通過")
             
             # === 2. 立即記錄接收到的信號 ===
             logger.info("🔍 步驟2: 開始記錄信號...")
-            signal_id = trading_data_manager.record_signal_received(signal_data)
-            logger.info(f"✅ 步驟2: 信號已記錄到資料庫，ID: {signal_id}")
+            try:
+                signal_id = trading_data_manager.record_signal_received(signal_data)
+                logger.info(f"✅ 步驟2: 信號已記錄到資料庫，ID: {signal_id}")
+            except Exception as e:
+                logger.error(f"⚠️ 信號記錄失敗但繼續處理: {e}")
+                # 信號記錄失敗不應該阻止後續處理
             
             # === 3. 🧠 ML特徵計算和記錄 ===
             logger.info("🔍 步驟3: 開始ML特徵計算...")
             session_id = f"session_{int(time.time())}"
-            features = self._calculate_and_record_ml_features(session_id, signal_id, signal_data)
-            logger.info("✅ 步驟3: ML特徵計算完成")
+            try:
+                features = self._calculate_and_record_ml_features(session_id, signal_id, signal_data)
+                logger.info("✅ 步驟3: ML特徵計算完成")
+            except Exception as e:
+                logger.warning(f"⚠️ ML特徵計算失敗，使用默認特徵: {e}")
+                features = self._get_safe_default_features()
             
             # === 4. 🤖 影子模式決策分析 ===
             logger.info("🔍 步驟4: 開始影子決策分析...")
-            shadow_result = self._execute_shadow_decision(session_id, signal_id, features, signal_data)
-            logger.info("✅ 步驟4: 影子決策分析完成")
+            try:
+                shadow_result = self._execute_shadow_decision(session_id, signal_id, features, signal_data)
+                logger.info("✅ 步驟4: 影子決策分析完成")
+            except Exception as e:
+                logger.warning(f"⚠️ 影子決策失敗，使用默認決策: {e}")
+                shadow_result = self._get_fallback_shadow_result()
             
             # === 5. 解析和處理信號 ===
             logger.info("🔍 步驟5: 開始解析信號數據...")
-            parsed_signal = self._parse_signal_data(signal_data)
-            logger.info("✅ 步驟5: 信號解析完成")
+            try:
+                parsed_signal = self._parse_signal_data(signal_data)
+                logger.info("✅ 步驟5: 信號解析完成")
+            except ValueError as ve:
+                # 業務邏輯錯誤 - 返回400避免重試
+                logger.error(f"❌ 信號解析失敗: {ve}")
+                return {"status": "error", "message": str(ve), "error_type": "business", "signal_id": signal_id}
+            except Exception as e:
+                # 系統錯誤
+                logger.error(f"❌ 信號解析系統錯誤: {e}")
+                return {"status": "error", "message": f"信號解析系統錯誤: {str(e)}", "error_type": "system", "signal_id": signal_id}
             
             # === 6. 檢查交易時間 ===
             logger.info("🔍 步驟6: 開始檢查交易時間...")
             if not self._check_trading_time():
                 logger.warning("⚠️ 當前時間不允許交易，返回blocked狀態")
-                return {"status": "blocked", "message": "當前時間不允許交易"}
+                return {"status": "blocked", "message": "當前時間不允許交易", "signal_id": signal_id}
             logger.info("✅ 步驟6: 交易時間檢查通過")
             
             # === 7. 決定持倉動作 ===
             logger.info("🔍 步驟7: 開始決定持倉動作...")
-            position_decision = self._decide_position_action(parsed_signal)
-            logger.info(f"✅ 步驟7: 持倉動作決定完成 - {position_decision}")
+            try:
+                position_decision = self._decide_position_action(parsed_signal)
+                logger.info(f"✅ 步驟7: 持倉動作決定完成 - {position_decision}")
+            except Exception as e:
+                logger.warning(f"⚠️ 持倉檢查失敗，使用默認開倉: {e}")
+                position_decision = 'open'
             
             # === 8. 設置交易參數 ===
             logger.info("🔍 步驟8: 開始設置交易參數...")
-            self._setup_trading_parameters(parsed_signal)
-            logger.info("✅ 步驟8: 交易參數設置完成")
+            try:
+                self._setup_trading_parameters(parsed_signal)
+                logger.info("✅ 步驟8: 交易參數設置完成")
+            except Exception as e:
+                logger.warning(f"⚠️ 交易參數設置失敗但繼續: {e}")
             
             # === 9. 計算止盈參數 ===
             logger.info("🔍 步驟9: 開始計算止盈參數...")
-            tp_params = self._calculate_tp_parameters(parsed_signal)
-            logger.info("✅ 步驟9: 止盈參數計算完成")
+            try:
+                tp_params = self._calculate_tp_parameters(parsed_signal)
+                logger.info("✅ 步驟9: 止盈參數計算完成")
+            except Exception as e:
+                logger.warning(f"⚠️ 止盈參數計算失敗，使用默認值: {e}")
+                tp_params = {'tp_percentage': TP_PERCENTAGE, 'min_tp_percentage': MIN_TP_PROFIT_PERCENTAGE}
             
             # === 10. 🔄 ML模型維護 ===
             logger.info("🔍 步驟10: 開始ML模型維護...")
-            self._maintain_ml_system()
-            logger.info("✅ 步驟10: ML模型維護完成")
+            try:
+                self._maintain_ml_system()
+                logger.info("✅ 步驟10: ML模型維護完成")
+            except Exception as e:
+                logger.warning(f"⚠️ ML模型維護失敗: {e}")
             
             # === 11. 保存webhook數據 ===
             logger.info("🔍 步驟11: 開始保存webhook數據...")
-            self._save_webhook_data(parsed_signal, tp_params, shadow_result)
-            logger.info("✅ 步驟11: webhook數據保存完成")
+            try:
+                self._save_webhook_data(parsed_signal, tp_params, shadow_result)
+                logger.info("✅ 步驟11: webhook數據保存完成")
+            except Exception as e:
+                logger.warning(f"⚠️ webhook數據保存失敗: {e}")
             
             # === 12. 生成訂單（實際交易邏輯不變） ===
             logger.info("🔍 步驟12: 開始創建和執行訂單...")
-            order_result = self._create_and_execute_order(parsed_signal, tp_params, position_decision, signal_id, signal_start_time)
-            logger.info("✅ 步驟12: 訂單創建和執行完成")
+            try:
+                order_result = self._create_and_execute_order(parsed_signal, tp_params, position_decision, signal_id, signal_start_time)
+                logger.info("✅ 步驟12: 訂單創建和執行完成")
+            except Exception as e:
+                logger.error(f"❌ 訂單執行失敗: {e}")
+                return {"status": "error", "message": f"訂單執行失敗: {str(e)}", "error_type": "trading", "signal_id": signal_id}
             
             # === 13. 在結果中包含ML信息 ===
             logger.info("🔍 步驟13: 開始處理返回結果...")
@@ -187,10 +229,15 @@ class SignalProcessor:
             logger.info(f"🔍 最終返回結果: {order_result}")
             return order_result
             
+        except ValueError as ve:
+            # 業務邏輯錯誤 - 返回400狀態避免TradingView重試
+            logger.error(f"❌ 業務邏輯錯誤: {str(ve)}")
+            return {"status": "error", "message": str(ve), "error_type": "business", "signal_id": signal_id}
         except Exception as e:
+            # 系統錯誤 - 返回500但已有去重機制防護
             logger.error(f"❌ 處理交易信號時出錯: {str(e)}")
             logger.error(traceback.format_exc())
-            return {"status": "error", "message": str(e), "signal_id": signal_id}
+            return {"status": "error", "message": f"系統錯誤: {str(e)}", "error_type": "system", "signal_id": signal_id}
     
     def _calculate_and_record_ml_features(self, session_id: str, signal_id: int, signal_data: dict):
         """
@@ -387,61 +434,108 @@ class SignalProcessor:
     # === 核心信號處理方法 ===
     
     def _parse_signal_data(self, signal_data):
-        """解析信號數據 - 🔥 修復 order_type 和其他參數問題"""
+        """解析信號數據 - 🛡️ 強化錯誤處理"""
         try:
-            # 🔥 修復1：確保 side 轉為大寫（Binance API要求）
+            # 🛡️ 1: 確保 side 轉為大寫（Binance API要求）
             side = signal_data.get('side', '').upper()
             if side not in ['BUY', 'SELL']:
                 raise ValueError(f"無效的交易方向: {signal_data.get('side')}")
             
-            # 🔥 修復2：正確提取和轉換 opposite 參數
+            # 🛡️ 2: 正確提取和轉換 opposite 參數
             opposite_raw = signal_data.get('opposite', 0)
-            if isinstance(opposite_raw, str):
-                opposite = int(opposite_raw)
-            else:
-                opposite = int(opposite_raw)
+            try:
+                if isinstance(opposite_raw, str):
+                    opposite = int(opposite_raw)
+                else:
+                    opposite = int(opposite_raw)
+            except (ValueError, TypeError):
+                logger.warning(f"⚠️ 無效的opposite值: {opposite_raw}，使用默認值0")
+                opposite = 0
             
-            # 🔥 修復3：提取其他必要參數
+            # 🛡️ 3: 提取其他必要參數
             symbol = signal_data.get('symbol')
             signal_type = signal_data.get('signal_type')
             
-            # 🔥 修復4：正確提取 order_type
+            if not symbol:
+                raise ValueError("缺少必要的symbol參數")
+            if not signal_type:
+                raise ValueError("缺少必要的signal_type參數")
+            
+            # 🛡️ 4: 正確提取 order_type
             order_type = signal_data.get('order_type', 'MARKET').upper()
             
-            # 🔥 修復5：根據 order_type 和 opposite 決定價格
+            # 🛡️ 5: 根據 order_type 和 opposite 決定價格 - 增強錯誤處理
             price = None
+            price_source = "市價單"
+            
             if order_type == 'LIMIT':
                 # 限價單需要價格，根據 opposite 參數選擇正確的價格欄位
                 if opposite == 0:
                     # 當前收盤價模式
-                    price = float(signal_data.get('close', 0)) if signal_data.get('close') else None
-                    price_source = "close (當前收盤價)"
+                    raw_price = signal_data.get('close')
+                    if raw_price:
+                        try:
+                            price = float(raw_price)
+                            price_source = "close (當前收盤價)"
+                        except (ValueError, TypeError):
+                            logger.warning(f"⚠️ 無效的close價格: {raw_price}")
+                            
                 elif opposite == 1:
                     # 🎯 reversal_buy專用：前根收盤價-1%折扣策略
-                    base_price = float(signal_data.get('prev_close', 0)) if signal_data.get('prev_close') else None
-                    if base_price and signal_type == 'reversal_buy':
-                        # reversal_buy策略使用1%折扣
-                        discount_amount = base_price * 0.01
-                        price = base_price - discount_amount
-                        price_source = f"reversal_buy低1%策略 ({base_price:.6f} - {discount_amount:.6f} = {price:.6f})"
-                    else:
-                        # 其他策略使用前根收盤價
-                        price = base_price
-                        price_source = "prev_close (前根收盤價)"
+                    raw_base_price = signal_data.get('prev_close')
+                    if raw_base_price:
+                        try:
+                            base_price = float(raw_base_price)
+                            if base_price > 0 and signal_type == 'reversal_buy':
+                                # reversal_buy策略使用1%折扣
+                                discount_amount = base_price * 0.01
+                                price = base_price - discount_amount
+                                
+                                # 🛡️ 根據交易對調整價格精度 - 防止精度錯誤
+                                try:
+                                    if symbol in ['BNBUSDC', 'BNBUSDT']:
+                                        price = round(price, 3)  # BNBUSDC只允許3位小數
+                                    else:
+                                        price = round(price, 6)  # 其他交易對使用6位小數
+                                        
+                                    price_source = f"reversal_buy低1%策略 ({base_price:.6f} - {discount_amount:.6f} = {price:.{3 if symbol in ['BNBUSDC', 'BNBUSDT'] else 6}f})"
+                                except Exception as pe:
+                                    logger.error(f"❌ 價格精度處理錯誤: {pe}")
+                                    price = base_price  # 回退到原價
+                                    price_source = "prev_close (回退)"
+                            else:
+                                # 其他策略使用前根收盤價
+                                price = base_price
+                                price_source = "prev_close (前根收盤價)"
+                        except (ValueError, TypeError):
+                            logger.warning(f"⚠️ 無效的prev_close價格: {raw_base_price}")
+                            
                 elif opposite == 2:
                     # 前根開盤價模式
-                    price = float(signal_data.get('prev_open', 0)) if signal_data.get('prev_open') else None
-                    price_source = "prev_open (前根開盤價)"
+                    raw_price = signal_data.get('prev_open')
+                    if raw_price:
+                        try:
+                            price = float(raw_price)
+                            price_source = "prev_open (前根開盤價)"
+                        except (ValueError, TypeError):
+                            logger.warning(f"⚠️ 無效的prev_open價格: {raw_price}")
                 else:
                     # 未知模式，使用當前收盤價作為備案
-                    price = float(signal_data.get('close', 0)) if signal_data.get('close') else None
-                    price_source = "close (備案:當前收盤價)"
-                    logger.warning(f"⚠️ 未知的opposite值: {opposite}，使用當前收盤價作為備案")
+                    raw_price = signal_data.get('close')
+                    if raw_price:
+                        try:
+                            price = float(raw_price)
+                            price_source = "close (備案:當前收盤價)"
+                        except (ValueError, TypeError):
+                            pass
+                    logger.warning(f"⚠️ 未知的opposite值: {opposite}，嘗試使用當前收盤價作為備案")
                 
+                # 🛡️ 價格有效性檢查
                 if not price or price <= 0:
                     logger.warning(f"⚠️ 限價單缺少有效價格 (來源: {price_source})，改為市價單")
                     order_type = 'MARKET'
                     price = None
+                    price_source = "市價單 (限價失效回退)"
                 else:
                     logger.info(f"🔍 限價單價格來源: {price_source} = {price}")
             
@@ -450,29 +544,39 @@ class SignalProcessor:
             logger.info(f"🔍 order_type 原始值: {signal_data.get('order_type')} -> 解析值: {order_type}")
             logger.info(f"🔍 調用 get_tp_multiplier({symbol}, opposite={opposite}, signal_type={signal_type})")
             
-            # 🔥 修復6：正確調用 get_tp_multiplier 並傳遞所有參數
-            tp_multiplier = get_tp_multiplier(symbol, opposite, signal_type)
+            # 🛡️ 6: 正確調用 get_tp_multiplier 並傳遞所有參數
+            try:
+                tp_multiplier = get_tp_multiplier(symbol, opposite, signal_type)
+            except Exception as e:
+                logger.error(f"❌ 計算tp_multiplier時出錯: {e}")
+                tp_multiplier = 1.0  # 使用默認倍數
             
             parsed = {
                 'symbol': symbol,
-                'side': side,  # 🔥 使用大寫的 side
+                'side': side,  # 🛡️ 使用大寫的 side
                 'signal_type': signal_type,
-                'strategy_name': signal_data.get('strategy_name'),  # 🔥 新增：strategy_name 字段
+                'strategy_name': signal_data.get('strategy_name'),  # 🛡️ 新增：strategy_name 字段
                 'quantity': signal_data.get('quantity'),
-                'price': price,  # 🔥 根據 order_type 決定價格
-                'order_type': order_type,  # 🔥 新增：order_type 字段
-                'opposite': opposite,  # 🔥 使用正確轉換的 opposite
+                'price': price,  # 🛡️ 根據 order_type 決定價格
+                'order_type': order_type,  # 🛡️ 新增：order_type 字段
+                'opposite': opposite,  # 🛡️ 使用正確轉換的 opposite
                 'atr': float(signal_data.get('ATR', 0)) if signal_data.get('ATR') else None,
                 'precision': get_symbol_precision(symbol),
-                'tp_multiplier': tp_multiplier  # 🔥 使用正確計算的倍數
+                'tp_multiplier': tp_multiplier  # 🛡️ 使用正確計算的倍數
             }
             
-            logger.info(f"📋 信號解析完成: {parsed['symbol']} {parsed['side']} {parsed['signal_type']} ({parsed['order_type']})")
+            logger.info(f"📋 信號解析完成: {parsed['symbol']} {parsed['side']} {parsed['signal_type']} ({parsed['order_type']}) - 價格來源: {price_source}")
             return parsed
             
+        except ValueError as ve:
+            # 業務邏輯錯誤，返回明確的錯誤信息
+            logger.error(f"❌ 信號數據驗證失敗: {str(ve)}")
+            raise ValueError(f"信號數據驗證失敗: {str(ve)}")
         except Exception as e:
-            logger.error(f"解析信號數據時出錯: {str(e)}")
-            raise
+            # 系統錯誤
+            logger.error(f"❌ 解析信號數據時出錯: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise RuntimeError(f"信號處理系統錯誤: {str(e)}")
 
     def _check_trading_time(self):
         """檢查是否在允許交易的時間內 - 🔥 修復邏輯和參數"""

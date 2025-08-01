@@ -23,32 +23,103 @@ logger = logging.getLogger(__name__)
 def register_routes(app):
     """註冊所有路由到Flask應用"""
     
-    @app.route('/webhook', methods=['POST'])
+    import hashlib
+    import json
+    from datetime import datetime, timedelta
+    
+    # 🔒 信號去重相關函數
+    signal_processing_cache = {}  # 格式: {signal_hash: {'start_time': datetime, 'status': str}}
+    SIGNAL_CACHE_TIMEOUT = 300  # 5分鐘緩存超時
+    
+    def _generate_signal_hash(signal_data):
+        """生成信號的唯一標識hash"""
+        # 使用關鍵字段生成hash，避免timestamp等無關字段影響
+        key_fields = {
+            'symbol': signal_data.get('symbol', ''),
+            'signal_type': signal_data.get('signal_type', ''),
+            'side': signal_data.get('side', ''),
+            'price': signal_data.get('price', ''),
+            'percentage': signal_data.get('percentage', ''),
+            'exchange': signal_data.get('exchange', ''),
+            'mode': signal_data.get('mode', '')
+        }
+        
+        # 將字典轉為JSON字符串並生成hash
+        key_string = json.dumps(key_fields, sort_keys=True)
+        return hashlib.md5(key_string.encode()).hexdigest()
+    
+    def _is_duplicate_signal(signal_hash):
+        """檢查是否為重複信號"""
+        now = datetime.now()
+        
+        # 清理過期緩存
+        expired_hashes = []
+        for hash_key, cache_data in signal_processing_cache.items():
+            if (now - cache_data['start_time']).total_seconds() > SIGNAL_CACHE_TIMEOUT:
+                expired_hashes.append(hash_key)
+        
+        for expired_hash in expired_hashes:
+            del signal_processing_cache[expired_hash]
+        
+        # 檢查是否已存在
+        return signal_hash in signal_processing_cache
+    
+    def _record_signal_processing_start(signal_hash):
+        """記錄信號處理開始"""
+        signal_processing_cache[signal_hash] = {
+            'start_time': datetime.now(),
+            'status': 'processing'
+        }
+    
+    def _record_signal_processing_complete(signal_hash, status):
+        """記錄信號處理完成"""
+        if signal_hash in signal_processing_cache:
+            signal_processing_cache[signal_hash]['status'] = status
+            signal_processing_cache[signal_hash]['complete_time'] = datetime.now()
+
     def webhook():
-        """接收TradingView信號的API端點"""
-        try:
-            # === 1. 接收和驗證數據 ===
-            data = request.json
+    """接收TradingView信號的API端點 - 🔒 新增去重機制"""
+    try:
+        # === 1. 接收和驗證數據 ===
+        data = request.json
+        
+        if not data:
+            return jsonify({"status": "error", "message": "無效的數據"}), 400
+        
+        # === 2. 🔒 信號去重檢查 ===
+        signal_hash = _generate_signal_hash(data)
+        if _is_duplicate_signal(signal_hash):
+            logger.info(f"🔄 檢測到重複信號，直接返回成功: hash={signal_hash[:12]}")
+            return jsonify({
+                "status": "success", 
+                "message": "信號已處理（去重）",
+                "signal_hash": signal_hash[:12],
+                "duplicate": True
+            })
+        
+        # === 3. 記錄信號處理開始 ===
+        _record_signal_processing_start(signal_hash)
+        
+        # === 4. 處理信號 ===
+        result = signal_processor.process_signal(data)
+        
+        # === 5. 記錄處理完成 ===
+        _record_signal_processing_complete(signal_hash, result.get('status'))
+        
+        # === 6. 返回處理結果 ===
+        if result.get('status') == 'error':
+            return jsonify(result), 400  # 改為400避免TradingView重試
+        elif result.get('status') == 'ignored':
+            return jsonify(result)
+        else:
+            return jsonify(result)
             
-            if not data:
-                return jsonify({"status": "error", "message": "無效的數據"}), 400
-            
-            # === 2. 處理信號 ===
-            result = signal_processor.process_signal(data)
-            
-            # === 3. 返回處理結果 ===
-            if result.get('status') == 'error':
-                return jsonify(result), 500
-            elif result.get('status') == 'ignored':
-                return jsonify(result)
-            else:
-                return jsonify(result)
-                
-        except Exception as e:
-            logger.error(f"處理webhook時出錯: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return jsonify({"status": "error", "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"處理webhook時出錯: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # 對於系統錯誤，返回500會觸發TradingView重試，但我們已經有去重機制防護
+        return jsonify({"status": "error", "message": str(e)}), 500
     
     @app.route('/health', methods=['GET'])
     def health_check():
