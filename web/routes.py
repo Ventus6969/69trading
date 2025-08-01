@@ -77,49 +77,50 @@ def register_routes(app):
             signal_processing_cache[signal_hash]['status'] = status
             signal_processing_cache[signal_hash]['complete_time'] = datetime.now()
 
+    @app.route('/webhook', methods=['POST'])
     def webhook():
-    """接收TradingView信號的API端點 - 🔒 新增去重機制"""
-    try:
-        # === 1. 接收和驗證數據 ===
-        data = request.json
-        
-        if not data:
-            return jsonify({"status": "error", "message": "無效的數據"}), 400
-        
-        # === 2. 🔒 信號去重檢查 ===
-        signal_hash = _generate_signal_hash(data)
-        if _is_duplicate_signal(signal_hash):
-            logger.info(f"🔄 檢測到重複信號，直接返回成功: hash={signal_hash[:12]}")
-            return jsonify({
-                "status": "success", 
-                "message": "信號已處理（去重）",
-                "signal_hash": signal_hash[:12],
-                "duplicate": True
-            })
-        
-        # === 3. 記錄信號處理開始 ===
-        _record_signal_processing_start(signal_hash)
-        
-        # === 4. 處理信號 ===
-        result = signal_processor.process_signal(data)
-        
-        # === 5. 記錄處理完成 ===
-        _record_signal_processing_complete(signal_hash, result.get('status'))
-        
-        # === 6. 返回處理結果 ===
-        if result.get('status') == 'error':
-            return jsonify(result), 400  # 改為400避免TradingView重試
-        elif result.get('status') == 'ignored':
-            return jsonify(result)
-        else:
-            return jsonify(result)
+        """接收TradingView信號的API端點 - 🔒 新增去重機制"""
+        try:
+            # === 1. 接收和驗證數據 ===
+            data = request.json
             
-    except Exception as e:
-        logger.error(f"處理webhook時出錯: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        # 對於系統錯誤，返回500會觸發TradingView重試，但我們已經有去重機制防護
-        return jsonify({"status": "error", "message": str(e)}), 500
+            if not data:
+                return jsonify({"status": "error", "message": "無效的數據"}), 400
+            
+            # === 2. 🔒 信號去重檢查 ===
+            signal_hash = _generate_signal_hash(data)
+            if _is_duplicate_signal(signal_hash):
+                logger.info(f"🔄 檢測到重複信號，直接返回成功: hash={signal_hash[:12]}")
+                return jsonify({
+                    "status": "success", 
+                    "message": "信號已處理（去重）",
+                    "signal_hash": signal_hash[:12],
+                    "duplicate": True
+                })
+            
+            # === 3. 記錄信號處理開始 ===
+            _record_signal_processing_start(signal_hash)
+            
+            # === 4. 處理信號 ===
+            result = signal_processor.process_signal(data)
+            
+            # === 5. 記錄處理完成 ===
+            _record_signal_processing_complete(signal_hash, result.get('status'))
+            
+            # === 6. 返回處理結果 ===
+            if result.get('status') == 'error':
+                return jsonify(result), 400  # 改為400避免TradingView重試
+            elif result.get('status') == 'ignored':
+                return jsonify(result)
+            else:
+                return jsonify(result)
+                
+        except Exception as e:
+            logger.error(f"處理webhook時出錯: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # 對於系統錯誤，返回500會觸發TradingView重試，但我們已經有去重機制防護
+            return jsonify({"status": "error", "message": str(e)}), 500
     
     @app.route('/health', methods=['GET'])
     def health_check():
