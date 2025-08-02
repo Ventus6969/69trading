@@ -493,12 +493,11 @@ class SignalProcessor:
                                 
                                 # 🛡️ 根據交易對調整價格精度 - 防止精度錯誤
                                 try:
-                                    if symbol in ['BNBUSDC', 'BNBUSDT']:
-                                        price = round(price, 3)  # BNBUSDC只允許3位小數
-                                    else:
-                                        price = round(price, 6)  # 其他交易對使用6位小數
+                                    from utils.helpers import get_symbol_precision
+                                    precision = get_symbol_precision(symbol)
+                                    price = round(price, precision)  # 使用正確的交易對精度
                                         
-                                    price_source = f"reversal_buy低1%策略 ({base_price:.6f} - {discount_amount:.6f} = {price:.{3 if symbol in ['BNBUSDC', 'BNBUSDT'] else 6}f})"
+                                    price_source = f"reversal_buy低1%策略 ({base_price:.6f} - {discount_amount:.6f} = {price:.{precision}f})"
                                 except Exception as pe:
                                     logger.error(f"❌ 價格精度處理錯誤: {pe}")
                                     price = base_price  # 回退到原價

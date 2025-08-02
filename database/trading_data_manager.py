@@ -254,6 +254,19 @@ class TradingDataManager:
         except Exception as e:
             logger.error(f"記錄訂單執行時出錯: {str(e)}")
             return False
+
+    def record_order_execution(self, signal_id: int, order_data: Dict[str, Any]) -> bool:
+        """
+        記錄訂單執行信息 (別名方法，調用record_order_executed)
+        
+        Args:
+            signal_id: 對應的信號ID
+            order_data: 訂單數據字典
+            
+        Returns:
+            bool: 是否記錄成功
+        """
+        return self.record_order_executed(signal_id, order_data)
     
     def record_trading_result_by_client_id(self, client_order_id: str, result_data: Dict[str, Any]) -> bool:
         """

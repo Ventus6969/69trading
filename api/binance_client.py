@@ -8,6 +8,7 @@ import hashlib
 import time
 import requests
 import logging
+from typing import List, Dict, Any
 from config.settings import API_KEY, API_SECRET, BASE_URL
 
 # 設置logger
@@ -280,6 +281,47 @@ class BinanceClient:
         else:
             logger.error(f"取消訂單失敗: {response.text}")
             return None
+
+    def get_all_open_orders(self, symbol: str = None) -> List[Dict[str, Any]]:
+        """
+        獲取所有開放的訂單
+        
+        Args:
+            symbol: 可選，指定交易對
+            
+        Returns:
+            List[Dict]: 開放訂單列表
+        """
+        try:
+            timestamp = int(time.time() * 1000)
+            params = {
+                'timestamp': timestamp
+            }
+            
+            if symbol:
+                params['symbol'] = symbol.upper()
+            
+            query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+            signature = self._sign_request(query_string)
+            params['signature'] = signature
+            
+            response = requests.get(
+                f"{self.base_url}/fapi/v1/openOrders",
+                params=params,
+                headers={'X-MBX-APIKEY': self.api_key}
+            )
+            
+            if response.status_code == 200:
+                orders = response.json()
+                logger.debug(f"獲取開放訂單成功: {len(orders)} 筆")
+                return orders
+            else:
+                logger.error(f"獲取開放訂單失敗: {response.text}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"獲取開放訂單時出錯: {str(e)}")
+            return []
 
 # 創建全局客戶端實例
 binance_client = BinanceClient()

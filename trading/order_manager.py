@@ -441,38 +441,53 @@ class OrderManager:
             logger.error(traceback.format_exc())
 
     def _record_tp_sl_order_to_db(self, signal_id, client_order_id, symbol, side, 
-                                  order_type, quantity, price, binance_order_id, status):
-        """
-        🔥 新增：記錄止盈止損單到資料庫
-        """
-        try:
-            from database import trading_data_manager
+                              order_type, quantity, price, binance_order_id, status):
+    """
+    🔥 新增：記錄止盈止損單到資料庫 - 增強版本
+    """
+    try:
+        from database import trading_data_manager
+        
+        # 🔥 新增：防護性檢查signal_id
+        if signal_id is None:
+            logger.warning(f"⚠️ 止盈止損單 {client_order_id} 的signal_id為None，可能主訂單尚未記錄完成")
+            # 嘗試等待並重試
+            import time
+            time.sleep(0.5)  # 等待500ms
+            signal_id = self._get_signal_id_from_main_order(client_order_id.split('_')[0])
             
-            order_data = {
-                'client_order_id': client_order_id,
-                'symbol': symbol,
-                'side': side,
-                'order_type': order_type,
-                'quantity': quantity,
-                'price': price,
-                'leverage': 30,  # 預設槓桿
-                'binance_order_id': binance_order_id,
-                'status': status,
-                'is_add_position': False,  # 止盈止損不是加倉
-            }
-            
-            success = trading_data_manager.record_order_execution(signal_id, order_data)
-            
-            if success:
-                logger.info(f"✅ 止盈止損單已記錄到資料庫: {client_order_id}")
+            if signal_id is None:
+                logger.error(f"❌ 無法獲取止盈止損單 {client_order_id} 的signal_id，跳過資料庫記錄")
+                return False
             else:
-                logger.error(f"❌ 止盈止損單記錄失敗: {client_order_id}")
-                
-            return success
+                logger.info(f"✅ 重試後成功獲取signal_id: {signal_id}")
+        
+        order_data = {
+            'client_order_id': client_order_id,
+            'symbol': symbol,
+            'side': side,
+            'order_type': order_type,
+            'quantity': quantity,
+            'price': price,
+            'leverage': 30,  # 預設槓桿
+            'binance_order_id': binance_order_id,
+            'status': status,
+            'is_add_position': False,  # 止盈止損不是加倉
+        }
+        
+        success = trading_data_manager.record_order_execution(signal_id, order_data)
+        
+        if success:
+            logger.info(f"✅ 止盈止損單已記錄到資料庫: {client_order_id}, signal_id: {signal_id}")
+        else:
+            logger.error(f"❌ 止盈止損單記錄失敗: {client_order_id}, signal_id: {signal_id}")
             
-        except Exception as e:
-            logger.error(f"記錄止盈止損單到資料庫時出錯: {str(e)}")
-            return False
+        return success
+        
+    except Exception as e:
+        logger.error(f"記錄止盈止損單到資料庫時出錯: {str(e)}")
+        logger.error(traceback.format_exc())
+        return False
 
     def _get_signal_id_from_main_order(self, main_client_order_id):
         """
