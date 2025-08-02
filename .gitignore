@@ -8,3 +8,29 @@ logs/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# === Claude Code 和開發工具檔案 ===
+.serena/
+CLAUDE.md
+
+# === 專案規劃和設計文件 ===
+*規劃*.md
+*設計*.md
+ML系統*.md
+69交易機器人*.md
+
+# === 原始程式和備份檔案 ===
+Tradingview*.txt
+*.bak
+*.backup
+*_old.py
+*_backup.py
+
+# === 臨時修復和輔助腳本 ===
+fix_*.py
+*1.py
+ml_status_monitor.py
+
+# === 資料庫檔案 ===
+*.db
+*.sqlite
