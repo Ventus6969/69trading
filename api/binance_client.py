@@ -282,6 +282,85 @@ class BinanceClient:
             logger.error(f"取消訂單失敗: {response.text}")
             return None
 
+    def cancel_order_by_client_id(self, client_order_id):
+        """
+        按client_order_id取消訂單（不需要symbol）
+        
+        Args:
+            client_order_id: 客戶訂單ID
+            
+        Returns:
+            dict: 取消結果
+        """
+        try:
+            # 從client_order_id中提取symbol
+            # 格式: V69_SYMBOL_序號
+            if not client_order_id.startswith('V69_'):
+                logger.error(f"無效的訂單ID格式: {client_order_id}")
+                return None
+            
+            parts = client_order_id.split('_')
+            if len(parts) < 3:
+                logger.error(f"無法從訂單ID提取交易對: {client_order_id}")
+                return None
+            
+            symbol = parts[1]  # 提取交易對
+            
+            # 呼叫原有的取消方法
+            return self.cancel_order(symbol, client_order_id)
+            
+        except Exception as e:
+            logger.error(f"按client_id取消訂單失敗: {client_order_id} - {str(e)}")
+            return None
+
+    def get_order_by_client_id(self, client_order_id):
+        """
+        按client_order_id查詢訂單
+        
+        Args:
+            client_order_id: 客戶訂單ID
+            
+        Returns:
+            dict: 訂單資訊
+        """
+        try:
+            # 從client_order_id中提取symbol
+            if not client_order_id.startswith('V69_'):
+                logger.error(f"無效的訂單ID格式: {client_order_id}")
+                return None
+            
+            parts = client_order_id.split('_')
+            if len(parts) < 3:
+                logger.error(f"無法從訂單ID提取交易對: {client_order_id}")
+                return None
+            
+            symbol = parts[1]  # 提取交易對
+            
+            endpoint = "/fapi/v1/order"
+            headers = {"X-MBX-APIKEY": self.api_key}
+            
+            params = {
+                "symbol": symbol,
+                "origClientOrderId": client_order_id,
+                "timestamp": int(time.time() * 1000)
+            }
+            
+            # 簽名
+            params = self._sign_request(params)
+            
+            # 發送請求
+            response = requests.get(f"{self.base_url}{endpoint}", headers=headers, params=params)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"查詢訂單失敗: {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"按client_id查詢訂單失敗: {client_order_id} - {str(e)}")
+            return None
+
     def get_all_open_orders(self, symbol: str = None) -> List[Dict[str, Any]]:
         """
         獲取所有開放的訂單

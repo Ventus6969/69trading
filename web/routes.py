@@ -156,6 +156,13 @@ def register_routes(app):
                 total_pnl = 0
                 logger.warning(f"健康檢查時獲取持倉信息失敗: {str(e)}")
             
+            # 檢查超時管理器狀態
+            try:
+                from trading import timeout_manager
+                timeout_status = timeout_manager.get_status()
+            except Exception as e:
+                timeout_status = {"running": False, "error": str(e)}
+            
             # 構造健康檢查響應
             health_status = {
                 "status": "ok",
@@ -170,7 +177,8 @@ def register_routes(app):
                     "total_unrealized_pnl": round(total_pnl, 4),
                     "last_webhook_time": datetime.fromtimestamp(last_webhook_time).strftime('%Y-%m-%d %H:%M:%S') if last_webhook_time else "無",
                     "leverage": f"{DEFAULT_LEVERAGE}x",
-                    "timezone": "Asia/Taipei"
+                    "timezone": "Asia/Taipei",
+                    "timeout_manager": timeout_status
                 },
                 "active_positions": {symbol: {"side": pos["side"], "amount": pos["positionAmt"], "pnl": pos["unRealizedProfit"]} 
                                    for symbol, pos in current_positions.items()} if current_positions else {}

@@ -13,6 +13,7 @@ import time
 from utils.logger_config import setup_logging, get_logger
 from api.websocket_handler import WebSocketManager
 from web.app import create_flask_app
+from trading import timeout_manager
 
 def main():
     """主程式入口點"""
@@ -36,6 +37,14 @@ def main():
         time.sleep(2)
         
         # =============================================================================
+        # 啟動訂單超時管理器
+        # =============================================================================
+        logger.info("正在啟動訂單超時管理器...")
+        timeout_thread = threading.Thread(target=timeout_manager.start, daemon=True)
+        timeout_thread.start()
+        logger.info("訂單超時管理器已啟動")
+        
+        # =============================================================================
         # 啟動Flask服務
         # =============================================================================
         logger.info("正在啟動Flask服務...")
@@ -47,11 +56,13 @@ def main():
         
     except KeyboardInterrupt:
         logger.info("收到中斷信號，正在關閉系統...")
+        timeout_manager.stop()
     except Exception as e:
         logger.error(f"系統啟動失敗: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
     finally:
+        timeout_manager.stop()
         logger.info("交易機器人已停止運行")
 
 if __name__ == "__main__":
