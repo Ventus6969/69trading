@@ -493,7 +493,6 @@ class SignalProcessor:
                                 
                                 # 🛡️ 根據交易對調整價格精度 - 防止精度錯誤
                                 try:
-                                    from utils.helpers import get_symbol_precision
                                     precision = get_symbol_precision(symbol)
                                     price = round(price, precision)  # 使用正確的交易對精度
                                         
