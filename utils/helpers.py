@@ -71,7 +71,7 @@ def is_within_time_range(start_hour, start_minute, end_hour, end_minute):
 
 def generate_order_id(strategy_name, symbol, side, timestamp=None, counter=1):
     """
-    生成符合長度限制的訂單ID
+    生成符合長度限制的訂單ID - 改進版
     
     Args:
         strategy_name: 策略名稱
@@ -86,21 +86,45 @@ def generate_order_id(strategy_name, symbol, side, timestamp=None, counter=1):
     if timestamp is None:
         timestamp = int(time.time())
     
-    # 縮短策略名稱和交易對
-    short_strategy = strategy_name[:3] if len(strategy_name) > 3 else strategy_name
-    short_symbol = symbol[:6]  # 大多數交易對的基本貨幣部分
-    side_char = "B" if side == "BUY" else "S"  # 使用單字符表示方向
+    # 策略名稱縮短
+    short_strategy = strategy_name[:2] if len(strategy_name) > 2 else strategy_name
     
-    # 只保留時間戳的後4位數字
+    # 智能符號縮短 - 保留關鍵信息
+    side_char = "B" if side == "BUY" else "S"
     timestamp_short = timestamp % 10000
+    
+    # 為常見交易對創建智能映射
+    symbol_mapping = {
+        'WLDUSDC': 'WLD',
+        'BNBUSDC': 'BNB', 
+        'ETHUSDC': 'ETH',
+        'BTCUSDC': 'BTC',
+        'SOLUSDC': 'SOL',
+        'ADAUSDC': 'ADA',
+        'DOTUSDC': 'DOT',
+        'LINKUSDC': 'LINK'
+    }
+    
+    # 嘗試使用映射，否則取前4個字符
+    if symbol in symbol_mapping:
+        short_symbol = symbol_mapping[symbol]
+    elif symbol.endswith('USDC'):
+        short_symbol = symbol[:-4]  # 移除USDC後綴
+    elif symbol.endswith('USDT'):
+        short_symbol = symbol[:-4]  # 移除USDT後綴
+    else:
+        short_symbol = symbol[:4]
+    
+    # 確保符號不超過5個字符
+    short_symbol = short_symbol[:5]
     
     client_order_id = f"{short_strategy}_{short_symbol}_{side_char}{timestamp_short}_{counter}"
     
-    # 確保ID不超過30個字符(為止盈後綴預留空間)
+    # 確保ID不超過30個字符（為止盈後綴預留空間）
     if len(client_order_id) > 30:
-        # 進一步縮短ID
-        short_strategy = short_strategy[:2]
-        short_symbol = symbol[:4]
+        # 進一步縮短
+        short_strategy = short_strategy[:1]
+        short_symbol = short_symbol[:3]
         client_order_id = f"{short_strategy}_{short_symbol}_{side_char}{timestamp_short}_{counter}"
     
     return client_order_id
@@ -408,3 +432,77 @@ def is_valid_symbol(symbol):
         return False
     
     return True
+
+def extract_symbol_from_order_id(client_order_id):
+    """
+    從client_order_id中提取正確的交易對符號 - 改進版
+    支持新的訂單ID格式
+    
+    Args:
+        client_order_id: 客戶訂單ID (格式: 策略_符號_方向時間戳_計數器)
+        
+    Returns:
+        str: 交易對符號，如果提取失敗則返回None
+    """
+    try:
+        if not client_order_id:
+            logger.warning(f"無效的訂單ID: {client_order_id}")
+            return None
+        
+        parts = client_order_id.split('_')
+        if len(parts) < 3:
+            logger.warning(f"訂單ID格式不正確: {client_order_id}")
+            return None
+        
+        # 第二部分是符號（可能是縮短的）
+        short_symbol = parts[1]
+        
+        # 反向映射表 - 從縮短符號恢復完整符號
+        reverse_symbol_mapping = {
+            'WLD': 'WLDUSDC',
+            'BNB': 'BNBUSDC', 
+            'ETH': 'ETHUSDC',
+            'BTC': 'BTCUSDC',
+            'SOL': 'SOLUSDC',
+            'ADA': 'ADAUSDC',
+            'DOT': 'DOTUSDC',
+            'LINK': 'LINKUSDC'
+        }
+        
+        # 嘗試反向映射
+        if short_symbol in reverse_symbol_mapping:
+            full_symbol = reverse_symbol_mapping[short_symbol]
+            logger.info(f"符號映射: {short_symbol} -> {full_symbol}")
+            return full_symbol
+        
+        # 檢查是否已經是完整符號
+        if is_valid_symbol(short_symbol):
+            return short_symbol
+        
+        # 嘗試添加常見後綴
+        for suffix in ['USDC', 'USDT']:
+            candidate = short_symbol + suffix
+            if is_valid_symbol(candidate):
+                logger.info(f"符號補全: {short_symbol} -> {candidate}")
+                return candidate
+        
+        # 舊版本相容性處理
+        legacy_fixes = {
+            'BNBUSD': 'BNBUSDC',
+            'ETHUSD': 'ETHUSDC',
+            'BTCUSD': 'BTCUSDC',
+            'WLDUSD': 'WLDUSDC',
+            'SOLUSDT': 'SOLUSDC',  # 確保USDT也能映射到USDC
+        }
+        
+        if short_symbol in legacy_fixes:
+            fixed_symbol = legacy_fixes[short_symbol]
+            logger.info(f"舊版符號修復: {short_symbol} -> {fixed_symbol}")
+            return fixed_symbol
+        
+        logger.warning(f"無法識別符號: {short_symbol} (from {client_order_id})")
+        return short_symbol  # 返回原始符號作為後備
+        
+    except Exception as e:
+        logger.error(f"提取符號時發生錯誤: {client_order_id} - {str(e)}")
+        return None

@@ -169,7 +169,8 @@ class OrderManager:
                         'tp_placed': False,
                         'waiting_for_api_response': True,
                         'webhook_time': int(time.time()),
-                        'is_add_position': is_add_position
+                        'is_add_position': is_add_position,
+                        'signal_type': 'websocket_fill'  # 🔥 新增：WebSocket填充的訂單標記
                     }
                     
                     # 🔥 修正：使用保守的止盈設置，不依賴webhook數據
@@ -602,14 +603,26 @@ class OrderManager:
 
     # 🔥 新增：交易結果記錄方法
     def _record_tp_result(self, order_info):
-        """記錄止盈結果到trading_results表"""
+        """記錄止盈結果到trading_results表 - 強化版本"""
         try:
-            # 計算基本數據
-            entry_price = float(order_info.get('price', 0))
-            tp_price = float(order_info.get('tp_price', entry_price * 1.01))  # 使用記錄的止盈價
+            # 驗證必要數據
+            client_order_id = order_info.get('client_order_id')
+            symbol = order_info.get('symbol')
+            if not client_order_id or not symbol:
+                logger.error(f"缺少必要訂單數據: client_order_id={client_order_id}, symbol={symbol}")
+                return False
+
+            # 從WebSocket獲取的實際成交價格（如果有）
+            entry_price = float(order_info.get('filled_price') or order_info.get('price', 0))
+            tp_price = float(order_info.get('tp_price', 0))
             quantity = float(order_info.get('total_quantity') or order_info.get('quantity', 0))
             side = order_info.get('side')
-            entry_time_str = order_info.get('entry_time')
+            
+            # 數據驗證
+            if entry_price <= 0 or tp_price <= 0 or quantity <= 0:
+                logger.error(f"無效的交易數據: entry_price={entry_price}, tp_price={tp_price}, quantity={quantity}")
+                # 嘗試從log中提取實際價格（作為備用方案）
+                return self._fallback_record_tp_result(order_info)
 
             # 計算盈虧
             if side == 'BUY':
@@ -618,38 +631,79 @@ class OrderManager:
                 pnl = (entry_price - tp_price) * quantity
 
             # 計算持有時間
-            holding_time = self._calculate_holding_time(entry_time_str)
+            holding_time = self._calculate_holding_time(order_info.get('entry_time'))
 
             # 準備結果數據
             result_data = {
-                'client_order_id': order_info.get('client_order_id'),
-                'symbol': order_info.get('symbol'),
+                'client_order_id': client_order_id,
+                'symbol': symbol,
                 'final_pnl': round(pnl, 4),
-                'pnl_percentage': round((pnl / (entry_price * quantity)) * 100, 2),
-                'exit_method': 'TAKE_PROFIT',
+                'pnl_percentage': round((pnl / (entry_price * quantity)) * 100, 2) if entry_price * quantity > 0 else 0,
+                'exit_method': 'TP_FILLED',
                 'entry_price': entry_price,
                 'exit_price': tp_price,
                 'total_quantity': quantity,
                 'result_timestamp': int(time.time()),
-                'is_successful': True,  # 止盈表示成功
-                'holding_time_minutes': holding_time
+                'is_successful': pnl > 0,
+                'holding_time_minutes': holding_time,
+                'session_id': order_info.get('session_id')  # 重要：包含session_id用於ML關聯
             }
 
             # 寫入資料庫
             from database import trading_data_manager
             success = trading_data_manager.record_trading_result_by_client_id(
-                order_info.get('client_order_id'), result_data
+                client_order_id, result_data
             )
 
             if success:
-                logger.info(f"止盈結果記錄成功: 盈利 +{pnl:.4f} USDT, 持有時間: {holding_time}分鐘")
+                logger.info(f"止盈結果記錄成功: {client_order_id} 盈利 {pnl:.4f} USDT ({result_data['pnl_percentage']:.2f}%)")
             else:
-                logger.error(f"止盈結果記錄失敗")
+                logger.error(f"止盈結果記錄失敗: {client_order_id}")
 
             return success
 
         except Exception as e:
             logger.error(f"記錄止盈結果時出錯: {str(e)}")
+            logger.error(f"訂單信息: {order_info}")
+            return self._fallback_record_tp_result(order_info)
+
+    def _fallback_record_tp_result(self, order_info):
+        """備用記錄方案：當主要數據缺失時使用基本估算"""
+        try:
+            client_order_id = order_info.get('client_order_id')
+            symbol = order_info.get('symbol')
+            
+            logger.warning(f"使用備用記錄方案: {client_order_id}")
+            
+            # 基本數據
+            result_data = {
+                'client_order_id': client_order_id,
+                'symbol': symbol,
+                'final_pnl': 0.0,  # 暫時設為0，需要手動回補
+                'pnl_percentage': 0.0,
+                'exit_method': 'TP_FILLED',
+                'entry_price': 0.0,
+                'exit_price': 0.0,
+                'total_quantity': 0.0,
+                'result_timestamp': int(time.time()),
+                'is_successful': True,  # 止盈通常是成功的
+                'holding_time_minutes': 120,  # 預設2小時
+                'session_id': order_info.get('session_id'),
+                'trade_quality_score': 0.0  # 標記為需要手動補充
+            }
+            
+            from database import trading_data_manager
+            success = trading_data_manager.record_trading_result_by_client_id(
+                client_order_id, result_data
+            )
+            
+            if success:
+                logger.warning(f"備用記錄成功，但需要手動補充實際盈虧數據: {client_order_id}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"備用記錄方案也失敗: {str(e)}")
             return False
 
     def _record_sl_result(self, order_info):
@@ -937,6 +991,7 @@ class OrderManager:
                 'position_side': 'BOTH',
                 'atr': parsed_signal.get('atr'),
                 'tp_multiplier': parsed_signal.get('tp_multiplier'),
+                'signal_type': parsed_signal.get('signal_type', parsed_signal.get('strategy_name', 'unknown')),  # 🔥 新增：保存策略類型
                 'waiting_for_api_response': True,  # 標記正在等待API響應
                 'created_at': time.time()
             }

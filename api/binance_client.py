@@ -293,18 +293,13 @@ class BinanceClient:
             dict: 取消結果
         """
         try:
-            # 從client_order_id中提取symbol
-            # 格式: V69_SYMBOL_序號
-            if not client_order_id.startswith('V69_'):
-                logger.error(f"無效的訂單ID格式: {client_order_id}")
-                return None
+            # 使用新的符號提取函數
+            from utils.helpers import extract_symbol_from_order_id
             
-            parts = client_order_id.split('_')
-            if len(parts) < 3:
+            symbol = extract_symbol_from_order_id(client_order_id)
+            if not symbol:
                 logger.error(f"無法從訂單ID提取交易對: {client_order_id}")
                 return None
-            
-            symbol = parts[1]  # 提取交易對
             
             # 呼叫原有的取消方法
             return self.cancel_order(symbol, client_order_id)
@@ -324,17 +319,13 @@ class BinanceClient:
             dict: 訂單資訊
         """
         try:
-            # 從client_order_id中提取symbol
-            if not client_order_id.startswith('V69_'):
-                logger.error(f"無效的訂單ID格式: {client_order_id}")
-                return None
+            # 使用新的符號提取函數
+            from utils.helpers import extract_symbol_from_order_id
             
-            parts = client_order_id.split('_')
-            if len(parts) < 3:
+            symbol = extract_symbol_from_order_id(client_order_id)
+            if not symbol:
                 logger.error(f"無法從訂單ID提取交易對: {client_order_id}")
                 return None
-            
-            symbol = parts[1]  # 提取交易對
             
             endpoint = "/fapi/v1/order"
             headers = {"X-MBX-APIKEY": self.api_key}
@@ -391,15 +382,25 @@ class BinanceClient:
             )
             
             if response.status_code == 200:
-                orders = response.json()
-                logger.debug(f"獲取開放訂單成功: {len(orders)} 筆")
-                return orders
+                try:
+                    orders = response.json()
+                    # 驗證返回數據格式
+                    if isinstance(orders, list):
+                        logger.debug(f"獲取開放訂單成功: {len(orders)} 筆")
+                        return orders
+                    else:
+                        logger.error(f"API返回格式異常: {type(orders)} - {orders}")
+                        return []
+                except (ValueError, TypeError) as json_error:
+                    logger.error(f"JSON解析失敗: {json_error} - Response: {response.text[:200]}")
+                    return []
             else:
-                logger.error(f"獲取開放訂單失敗: {response.text}")
+                logger.error(f"獲取開放訂單失敗: {response.status_code} - {response.text}")
                 return []
                 
         except Exception as e:
             logger.error(f"獲取開放訂單時出錯: {str(e)}")
+            logger.error(f"請求URL: {params}")
             return []
 
 # 創建全局客戶端實例

@@ -178,28 +178,66 @@ class OrderTimeoutManager:
             binance_client: 幣安客戶端
         """
         try:
+            # 動態導入避免循環依賴
+            from trading.order_manager import order_manager
+            
             symbol = order_info.get('symbol')
             signal_type = order_info.get('signal_type', 'unknown')
             
             logger.info(f"⏰ 準備取消超時訂單：{order_id} - {symbol} - 策略：{signal_type}")
             
             # 取消前再次確認訂單狀態（避免競爭條件）
+            order_exists = True
             try:
-                current_order = binance_client.get_order_by_client_id(order_id)
-                if not current_order:
-                    logger.info(f"訂單已不存在，跳過取消：{order_id}")
-                    return
+                # 使用已知的正確symbol查詢訂單
+                endpoint = "/fapi/v1/order"
+                headers = {"X-MBX-APIKEY": binance_client.api_key}
+                import requests
+                import time
                 
-                current_status = current_order.get('status', '').upper()
-                if current_status not in ['NEW', 'PARTIALLY_FILLED']:
-                    logger.info(f"訂單狀態已變更（{current_status}），跳過取消：{order_id}")
-                    return
-                    
+                params = {
+                    "symbol": symbol,
+                    "origClientOrderId": order_id,
+                    "timestamp": int(time.time() * 1000)
+                }
+                
+                # 簽名
+                params = binance_client._sign_request(params)
+                
+                # 發送請求
+                response = requests.get(f"{binance_client.base_url}{endpoint}", headers=headers, params=params)
+                
+                if response.status_code == 200:
+                    current_order = response.json()
+                else:
+                    current_order = None
+                if not current_order:
+                    logger.info(f"訂單已不存在，從系統中移除：{order_id}")
+                    order_exists = False
+                else:
+                    current_status = current_order.get('status', '').upper()
+                    if current_status not in ['NEW', 'PARTIALLY_FILLED']:
+                        logger.info(f"訂單狀態已變更（{current_status}），從系統中移除：{order_id}")
+                        order_exists = False
+                        
             except Exception as e:
-                logger.warning(f"無法確認訂單狀態，繼續嘗試取消：{order_id} - {str(e)}")
+                logger.warning(f"無法確認訂單狀態：{order_id} - {str(e)}")
+                # 如果是訂單不存在的錯誤，標記為不存在
+                if "Order does not exist" in str(e) or "Unknown order" in str(e):
+                    logger.info(f"確認訂單不存在，從系統中移除：{order_id}")
+                    order_exists = False
             
-            # 執行取消操作
-            cancel_result = binance_client.cancel_order_by_client_id(order_id)
+            # 如果訂單不存在，從OrderManager中移除並退出
+            if not order_exists:
+                try:
+                    order_manager.remove_order(order_id)
+                    logger.info(f"✅ 已從系統中移除不存在的訂單：{order_id}")
+                except Exception as remove_error:
+                    logger.warning(f"移除訂單時出錯：{order_id} - {str(remove_error)}")
+                return
+            
+            # 執行取消操作 - 直接使用已知的正確symbol
+            cancel_result = binance_client.cancel_order(symbol, order_id)
             
             if cancel_result:
                 logger.info(f"✅ 超時訂單取消成功：{order_id}")
@@ -207,15 +245,26 @@ class OrderTimeoutManager:
                 # 同步取消相關的止盈止損單
                 self._cancel_related_tp_sl_orders(order_id, order_info, binance_client)
                 
+                # 從OrderManager中移除已取消的訂單
+                try:
+                    order_manager.remove_order(order_id)
+                    logger.info(f"✅ 已從系統中移除已取消的訂單：{order_id}")
+                except Exception as remove_error:
+                    logger.warning(f"移除已取消訂單時出錯：{order_id} - {str(remove_error)}")
+                
             else:
                 logger.warning(f"❌ 超時訂單取消失敗：{order_id}")
                 
         except Exception as e:
             # 常見的取消失敗原因，記錄但不影響系統運行
-            if "Unknown order sent" in str(e):
-                logger.info(f"訂單已不存在：{order_id}")
-            elif "Order does not exist" in str(e):
-                logger.info(f"訂單不存在：{order_id}")
+            if "Unknown order sent" in str(e) or "Order does not exist" in str(e):
+                logger.info(f"訂單已不存在，從系統中移除：{order_id}")
+                try:
+                    from trading.order_manager import order_manager
+                    order_manager.remove_order(order_id)
+                    logger.info(f"✅ 已從系統中移除不存在的訂單：{order_id}")
+                except Exception as remove_error:
+                    logger.warning(f"移除不存在訂單時出錯：{order_id} - {str(remove_error)}")
             else:
                 logger.error(f"取消超時訂單時出錯：{order_id} - {str(e)}")
     
@@ -235,7 +284,7 @@ class OrderTimeoutManager:
             tp_client_id = order_info.get('tp_client_id')
             if tp_client_id:
                 try:
-                    binance_client.cancel_order_by_client_id(tp_client_id)
+                    binance_client.cancel_order(symbol, tp_client_id)
                     logger.info(f"🎯 已取消相關止盈單：{tp_client_id}")
                 except Exception as e:
                     logger.warning(f"取消止盈單失敗：{tp_client_id} - {str(e)}")
@@ -244,7 +293,7 @@ class OrderTimeoutManager:
             sl_client_id = order_info.get('sl_client_id')
             if sl_client_id:
                 try:
-                    binance_client.cancel_order_by_client_id(sl_client_id)
+                    binance_client.cancel_order(symbol, sl_client_id)
                     logger.info(f"🛡️ 已取消相關止損單：{sl_client_id}")
                 except Exception as e:
                     logger.warning(f"取消止損單失敗：{sl_client_id} - {str(e)}")
