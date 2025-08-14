@@ -863,15 +863,18 @@ class MLDataManager:
                 cursor = conn.cursor()
                 
                 # 查詢歷史ML特徵和對應的交易結果
+                # 🔧 修復：使用client_order_id進行正確關聯
                 cursor.execute('''
                     SELECT 
                         mf.*,
                         tr.is_successful,
                         tr.final_pnl,
-                        tr.holding_time_minutes
+                        tr.holding_time_minutes,
+                        tr.exit_method,
+                        tr.pnl_percentage
                     FROM ml_features_v2 mf
                     LEFT JOIN orders_executed oe ON mf.signal_id = oe.signal_id
-                    LEFT JOIN trading_results tr ON oe.id = tr.order_id
+                    LEFT JOIN trading_results tr ON oe.client_order_id = tr.client_order_id
                     ORDER BY mf.created_at DESC
                     LIMIT ?
                 ''', (limit,))
@@ -883,6 +886,7 @@ class MLDataManager:
                     row_dict = dict(zip(columns, row))
                     results.append(row_dict)
                 
+                logger.info(f"📊 成功獲取{len(results)}筆ML特徵數據，其中{sum(1 for r in results if r.get('is_successful') is not None)}筆有交易結果")
                 return results
                 
         except Exception as e:
