@@ -86,8 +86,11 @@ def generate_order_id(strategy_name, symbol, side, timestamp=None, counter=1):
     if timestamp is None:
         timestamp = int(time.time())
     
-    # 策略名稱縮短
-    short_strategy = strategy_name[:2] if len(strategy_name) > 2 else strategy_name
+    # 保持V69策略名稱完整，其他策略才縮短
+    if strategy_name == "V69":
+        short_strategy = "V69"
+    else:
+        short_strategy = strategy_name[:2] if len(strategy_name) > 2 else strategy_name
     
     # 智能符號縮短 - 保留關鍵信息
     side_char = "B" if side == "BUY" else "S"
